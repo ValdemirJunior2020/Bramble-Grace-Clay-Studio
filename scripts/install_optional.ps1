@@ -114,11 +114,24 @@ if($Component -eq 'comfyui'){
   $dest=Join-Path $Models 'comfyui'
   if(Test-Path (Join-Path $dest 'main.py')){Write-Host 'ComfyUI already installed.';exit 0}
 
+  if(Test-Path $dest){
+    if(Test-Path (Join-Path $dest '.git')){
+      Write-Host 'Incomplete ComfyUI checkout found. Reusing it instead of downloading from zero.' -ForegroundColor Yellow
+      git -C $dest reset --hard HEAD
+      git -C $dest pull --ff-only
+    } else {
+      Write-Host 'Removing incomplete ComfyUI folder from the previous failed install...' -ForegroundColor Yellow
+      Remove-Item $dest -Recurse -Force
+    }
+  }
+
   $py313=Ensure-Python313
   Write-Host "Using Python 3.13: $py313"
 
-  git clone https://github.com/Comfy-Org/ComfyUI.git $dest
-  if($LASTEXITCODE -ne 0){throw 'Could not clone ComfyUI.'}
+  if(-not(Test-Path (Join-Path $dest 'main.py'))){
+    git clone https://github.com/Comfy-Org/ComfyUI.git $dest
+    if($LASTEXITCODE -ne 0){throw 'Could not clone ComfyUI.'}
+  }
 
   $venv=Join-Path $dest '.venv'
   & $py313 -m venv $venv
