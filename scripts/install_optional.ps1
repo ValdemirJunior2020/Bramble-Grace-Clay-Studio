@@ -21,9 +21,24 @@ function Py311 {
 }
 
 function Find-Python313 {
-  # New Python Install Manager prefers: py -V:3.13
-  # Older launcher accepts: py -3.13
-  # Store/manager aliases may also expose: python3.13.exe
+  # Preferred path for the modern Python Install Manager:
+  # ask it for the exact executable path, avoiding PATH/app-alias issues.
+  $tmpOut=[IO.Path]::GetTempFileName()
+  $tmpErr=[IO.Path]::GetTempFileName()
+  try {
+    $p=Start-Process -FilePath 'py' -ArgumentList @('list','--one','--format=exe','3.13') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -ErrorAction SilentlyContinue
+    if($p -and $p.ExitCode -eq 0){
+      $value=(Get-Content $tmpOut -Raw).Trim()
+      if($value -and (Test-Path $value)){
+        return $value
+      }
+    }
+  } catch {
+  } finally {
+    Remove-Item $tmpOut,$tmpErr -Force -ErrorAction SilentlyContinue
+  }
+
+  # Compatibility fallbacks for legacy launcher / global aliases.
   $probes=@(
     @{Exe='py'; Args=@('-V:3.13','-c','import sys;print(sys.executable)')},
     @{Exe='py'; Args=@('-3.13','-c','import sys;print(sys.executable)')},
@@ -53,7 +68,6 @@ function Find-Python313 {
 
   return $null
 }
-
 function Ensure-Python313 {
   $found=Find-Python313
   if($found){ return $found }
