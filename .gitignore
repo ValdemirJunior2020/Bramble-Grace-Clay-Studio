@@ -1,0 +1,16 @@
+.venv/
+runtime/
+frontend/node_modules/
+frontend/dist/
+data/projects/
+data/characters/
+data/voices/
+data/models/
+data/cache/
+data/temp/
+data/studio.sqlite3
+data/settings.json
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
