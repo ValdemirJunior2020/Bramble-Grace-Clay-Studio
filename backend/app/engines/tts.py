@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import shutil
@@ -36,7 +37,8 @@ def split_text(text: str, limit: int = 260) -> list[str]:
                 current = ""
                 for word in words:
                     if len(current) + len(word) + 1 > limit:
-                        if current: chunks.append(current)
+                        if current:
+                            chunks.append(current)
                         current = word
                     else:
                         current = (current + " " + word).strip()
@@ -91,13 +93,21 @@ def _load_chatterbox(language: str, settings: VoiceSettings):
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
     except Exception as exc:
         raise RuntimeError("Chatterbox is not installed in the local Python environment.") from exc
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     custom_pt = os.getenv("CHATTERBOX_PT_BR_T3_MODEL") if language == "pt-br" else None
-    t3_model = settings.model or custom_pt or os.getenv("CHATTERBOX_MULTILINGUAL_T3_MODEL", "v2")
-    key = f"{device}:{t3_model}"
+    requested_model = settings.model or custom_pt or os.getenv("CHATTERBOX_MULTILINGUAL_T3_MODEL", "v2")
+    loader = ChatterboxMultilingualTTS.from_pretrained
+    params = inspect.signature(loader).parameters
+    supports_t3 = "t3_model" in params
+    key = f"{device}:{requested_model if supports_t3 else 'default'}"
+
     with _MODEL_LOCK:
         if key not in _MODEL_CACHE:
-            _MODEL_CACHE[key] = ChatterboxMultilingualTTS.from_pretrained(device=device, t3_model=t3_model)
+            kwargs = {"device": device}
+            if supports_t3:
+                kwargs["t3_model"] = requested_model
+            _MODEL_CACHE[key] = loader(**kwargs)
     return _MODEL_CACHE[key]
 
 
@@ -113,9 +123,18 @@ def chatterbox_available() -> bool:
     except Exception:
         return False
 
+
 def _generate_chatterbox_service(text: str, outfile: Path, language: str, settings: VoiceSettings) -> bool:
     try:
-        payload = {"text": text, "language": language, "reference_audio": settings.reference_audio, "exaggeration": settings.exaggeration, "cfg": settings.cfg, "seed": settings.seed, "model": settings.model}
+        payload = {
+            "text": text,
+            "language": language,
+            "reference_audio": settings.reference_audio,
+            "exaggeration": settings.exaggeration,
+            "cfg": settings.cfg,
+            "seed": settings.seed,
+            "model": settings.model,
+        }
         r = httpx.post(f"{CHATTERBOX_SERVICE_URL}/generate", json=payload, timeout=600.0)
         if r.status_code != 200:
             raise RuntimeError(r.text[:500])
@@ -170,7 +189,10 @@ def generate_voice(text: str, outfile: Path, language: str, settings: VoiceSetti
                 raise RuntimeError(f"Unknown TTS engine: {engine}")
             norm = td_path / f"chunk-{i:03}-norm.wav"
             if shutil.which("ffmpeg"):
-                subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(raw), "-af", "loudnorm=I=-16:LRA=7:TP=-1.5", "-ar", "48000", "-ac", "2", str(norm)], check=True)
+                subprocess.run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(raw),
+                    "-af", "loudnorm=I=-16:LRA=7:TP=-1.5", "-ar", "48000", "-ac", "2", str(norm)
+                ], check=True)
             else:
                 shutil.copy2(raw, norm)
             chunk_files.append(norm)
@@ -182,8 +204,14 @@ def generate_voice(text: str, outfile: Path, language: str, settings: VoiceSetti
             if not shutil.which("ffmpeg"):
                 raise RuntimeError("FFmpeg is required to join long narration chunks.")
             concat = td_path / "concat.txt"
-            concat.write_text("\n".join("file '" + str(p).replace("'", "'\\''") + "'" for p in chunk_files), encoding="utf-8")
-            subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(concat), "-c:a", "pcm_s16le", joined], check=True)
+            concat.write_text(
+                "\n".join("file '" + str(p).replace("'", "'\\''") + "'" for p in chunk_files),
+                encoding="utf-8",
+            )
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                "-i", str(concat), "-c:a", "pcm_s16le", joined
+            ], check=True)
 
         speed = max(0.5, min(2.0, settings.speed * global_speed))
         _ffmpeg_speed(joined, outfile, speed, settings.volume_db)
