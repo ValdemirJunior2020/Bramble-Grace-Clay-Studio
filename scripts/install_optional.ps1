@@ -21,17 +21,36 @@ function Py311 {
 }
 
 function Find-Python313 {
-  $tmpOut=[IO.Path]::GetTempFileName()
-  $tmpErr=[IO.Path]::GetTempFileName()
-  try {
-    $p=Start-Process -FilePath 'py' -ArgumentList @('-3.13','-c','import sys;print(sys.executable)') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -ErrorAction SilentlyContinue
-    if($p -and $p.ExitCode -eq 0){
-      $value=(Get-Content $tmpOut -Raw).Trim()
-      if($value -and (Test-Path $value)){ return $value }
+  # New Python Install Manager prefers: py -V:3.13
+  # Older launcher accepts: py -3.13
+  # Store/manager aliases may also expose: python3.13.exe
+  $probes=@(
+    @{Exe='py'; Args=@('-V:3.13','-c','import sys;print(sys.executable)')},
+    @{Exe='py'; Args=@('-3.13','-c','import sys;print(sys.executable)')},
+    @{Exe='python3.13'; Args=@('-c','import sys;print(sys.executable)')},
+    @{Exe='python3.13.exe'; Args=@('-c','import sys;print(sys.executable)')}
+  )
+
+  foreach($probe in $probes){
+    $cmd=Get-Command $probe.Exe -ErrorAction SilentlyContinue
+    if(-not $cmd){ continue }
+
+    $tmpOut=[IO.Path]::GetTempFileName()
+    $tmpErr=[IO.Path]::GetTempFileName()
+    try {
+      $p=Start-Process -FilePath $probe.Exe -ArgumentList $probe.Args -Wait -PassThru -NoNewWindow -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -ErrorAction SilentlyContinue
+      if($p -and $p.ExitCode -eq 0){
+        $value=(Get-Content $tmpOut -Raw).Trim()
+        if($value -and (Test-Path $value)){
+          return $value
+        }
+      }
+    } catch {
+    } finally {
+      Remove-Item $tmpOut,$tmpErr -Force -ErrorAction SilentlyContinue
     }
-  } catch {} finally {
-    Remove-Item $tmpOut,$tmpErr -Force -ErrorAction SilentlyContinue
   }
+
   return $null
 }
 
