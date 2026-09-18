@@ -21,49 +21,47 @@ function Py311 {
 }
 
 function Find-Python313 {
-  # Preferred path for the modern Python Install Manager:
-  # ask it for the exact executable path, avoiding PATH/app-alias issues.
-  $tmpOut=[IO.Path]::GetTempFileName()
-  $tmpErr=[IO.Path]::GetTempFileName()
-  try {
-    $p=Start-Process -FilePath 'py' -ArgumentList @('list','--one','--format=exe','3.13') -Wait -PassThru -NoNewWindow -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -ErrorAction SilentlyContinue
-    if($p -and $p.ExitCode -eq 0){
-      $value=(Get-Content $tmpOut -Raw).Trim()
-      if($value -and (Test-Path $value)){
-        return $value
-      }
-    }
-  } catch {
-  } finally {
-    Remove-Item $tmpOut,$tmpErr -Force -ErrorAction SilentlyContinue
-  }
-
-  # Compatibility fallbacks for legacy launcher / global aliases.
+  # Robust detection for both the modern Python Install Manager and legacy launcher.
+  # The user's machine may have Python 3.13 installed even when "py list --format=exe"
+  # is unavailable or returns a path format that Test-Path cannot validate.
   $probes=@(
-    @{Exe='py'; Args=@('-V:3.13','-c','import sys;print(sys.executable)')},
-    @{Exe='py'; Args=@('-3.13','-c','import sys;print(sys.executable)')},
-    @{Exe='python3.13'; Args=@('-c','import sys;print(sys.executable)')},
-    @{Exe='python3.13.exe'; Args=@('-c','import sys;print(sys.executable)')}
+    @{Exe='py'; Args=@('-3.13','-c','import sys; print(sys.executable)')},
+    @{Exe='py'; Args=@('-V:3.13','-c','import sys; print(sys.executable)')},
+    @{Exe='python3.13'; Args=@('-c','import sys; print(sys.executable)')},
+    @{Exe='python3.13.exe'; Args=@('-c','import sys; print(sys.executable)')}
   )
 
   foreach($probe in $probes){
     $cmd=Get-Command $probe.Exe -ErrorAction SilentlyContinue
     if(-not $cmd){ continue }
 
-    $tmpOut=[IO.Path]::GetTempFileName()
-    $tmpErr=[IO.Path]::GetTempFileName()
     try {
-      $p=Start-Process -FilePath $probe.Exe -ArgumentList $probe.Args -Wait -PassThru -NoNewWindow -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -ErrorAction SilentlyContinue
-      if($p -and $p.ExitCode -eq 0){
-        $value=(Get-Content $tmpOut -Raw).Trim()
-        if($value -and (Test-Path $value)){
-          return $value
+      $output=& $probe.Exe @($probe.Args) 2>$null
+      if($LASTEXITCODE -eq 0){
+        $value=("$output").Trim()
+        if($value -and (Test-Path -LiteralPath $value)){
+          # Verify this executable is really Python 3.13 before returning it.
+          $version=& $value -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>$null
+          if($LASTEXITCODE -eq 0 -and ("$version").Trim() -eq '3.13'){
+            return $value
+          }
         }
       }
     } catch {
-    } finally {
-      Remove-Item $tmpOut,$tmpErr -Force -ErrorAction SilentlyContinue
     }
+  }
+
+  # Last fallback: ask the launcher for the version first, then query sys.executable.
+  try {
+    $version=& py -3.13 --version 2>&1
+    if($LASTEXITCODE -eq 0 -and ("$version") -match 'Python 3\.13'){
+      $value=& py -3.13 -c 'import sys; print(sys.executable)' 2>$null
+      $value=("$value").Trim()
+      if($value -and (Test-Path -LiteralPath $value)){
+        return $value
+      }
+    }
+  } catch {
   }
 
   return $null
