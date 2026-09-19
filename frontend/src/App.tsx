@@ -7,7 +7,7 @@ export default function App(){
  const load=async()=>{setProjects(await api('/api/projects'));setChars(await api('/api/characters'));};
  useEffect(()=>{load();const t=setInterval(async()=>{try{setQueue(await api('/api/queue'))}catch{}},1200);return()=>clearInterval(t)},[]);
  const open=async(id:string)=>{setProject(await api(`/api/projects/${id}`));setPage('editor')};
- const save=async(p=project)=>{if(!p)return;setProject(await api(`/api/projects/${p.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}));};
+ const save=async(p=project)=>{if(!p)return null;const updated=await api<Project>(`/api/projects/${p.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});setProject(updated);return updated;};
  const create=async()=>{const p=await api<Project>('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)});setShowNew(false);setProject(p);setPage('editor');load()};
  const switchLang=async(lang:string)=>{if(!project)return;setProject(await api(`/api/projects/${project.id}/language/${lang}`,{method:'POST'}));};
  const importStory=async(file?:File,text?:string)=>{if(!project)return null;const fd=new FormData();if(file)fd.append('file',file);if(text)fd.append('text',text);const updated=await api<Project>(`/api/projects/${project.id}/import-story`,{method:'POST',body:fd});setProject(updated);return updated;};
@@ -15,7 +15,7 @@ export default function App(){
  const replaceImage=async(s:Scene,file?:File)=>{if(!project||!file)return;try{setMsg(`Replacing Scene ${s.number} image...`);const fd=new FormData();fd.append('file',file);const updated=await api<Project>(`/api/projects/${project.id}/scenes/${s.id}/replace-image`,{method:'POST',body:fd});setProject(updated);setMsg(`Scene ${s.number} image replaced.`)}catch(e:any){setMsg(e?.message||'Could not replace the scene image.')}};
  const patchScene=async(s:Scene,patch:any)=>{if(!project)return;setProject(await api(`/api/projects/${project.id}/scenes/${s.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)}));};
  const move=async(s:Scene,dir:number)=>{if(!project)return;const a=[...project.scenes],i=a.findIndex(x=>x.id===s.id),j=Math.max(0,Math.min(a.length-1,i+dir));[a[i],a[j]]=[a[j],a[i]];setProject(await api(`/api/projects/${project.id}/scenes/reorder`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scene_ids:a.map(x=>x.id)})}));};
- const render=async(kind:'preview'|'render-story',s?:Scene)=>{if(!project)return;try{setMsg('Queued');const lang=project.settings.language==='pt-br'?'pt-br':'en';await api(kind==='preview'?`/api/projects/${project.id}/scenes/${s!.id}/preview?language=${lang}`:`/api/projects/${project.id}/render-story?language=${lang}`,{method:'POST'})}catch(e:any){setMsg(e.message)}};
+ const render=async(kind:'preview'|'render-story',s?:Scene)=>{if(!project)return;try{setMsg('Saving Video Settings...');const active=await save(project)||project;setMsg('Queued');const lang=active.settings.language==='pt-br'?'pt-br':'en';await api(kind==='preview'?`/api/projects/${active.id}/scenes/${s!.id}/preview?language=${lang}`:`/api/projects/${active.id}/render-story?language=${lang}`,{method:'POST'})}catch(e:any){setMsg(e.message)}};
  return <div className="app"><aside className="sidebar"><div className="brand">Bramble & Grace<small>Clay Studio • Local</small></div><div className="nav">{(['projects','characters','system'] as Page[]).map(x=><button key={x} className={page===x?'active':''} onClick={async()=>{setPage(x);if(x==='system')setSystem(await api('/api/system'))}}>{x==='projects'?'Projects':x==='characters'?'Characters & Voices':'System Status'}</button>)}{project&&<button className={page==='editor'?'active':''} onClick={()=>setPage('editor')}>Current Story</button>}</div></aside><main className="content">
  {page==='projects'&&<><div className="hero"><h1>Local clay story videos</h1><p>One story at a time. Upload as many scene images as you need.</p><button className="btn primary" onClick={()=>setShowNew(true)}>New Story Project</button></div><div className="grid">{projects.map(p=><div key={p.id} className="card" onClick={()=>open(p.id)}><h3>{p.title}</h3><div className="muted">Story {p.story_number||'—'} • {p.settings.language} • {p.scenes.length} scenes</div></div>)}</div></>}
  {page==='editor'&&project&&<Editor p={project} chars={chars} setP={setProject} save={save} importStory={importStory} addImages={addImages} replaceImage={replaceImage} patchScene={patchScene} move={move} switchLang={switchLang} render={render} setMsg={setMsg}/>} 
@@ -47,7 +47,8 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,patchScene
    if(busy)return;
    setBusy(true);
    try{
-     let active=p;
+     setMsg('Saving Video Settings...');
+     let active=await save(p)||p;
      if(noScript){
        if(!text.trim()){
          setMsg('Paste/import the story text first. No narration or dialogue is assigned to the scenes yet.');
