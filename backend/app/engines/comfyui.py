@@ -110,15 +110,50 @@ class ComfyUIAdapter:
                     progress_cb(min(0.95, (time.time() - start) / max(60, timeout * 0.25)), "Generating Motion")
                 history = client.get(f"{self.base_url}/history/{prompt_id}").json()
                 if prompt_id in history:
-                    outputs = history[prompt_id].get("outputs", {})
+                    entry = history[prompt_id]
+                    outputs = entry.get("outputs", {})
+                    status = entry.get("status") or {}
+                    status_str = str(status.get("status_str") or "").lower()
+                    completed = bool(status.get("completed"))
+                    messages = status.get("messages") or []
+
+                    # ComfyUI records failed executions in history too. Do not mistake
+                    # "history exists" for a successful render.
+                    if status_str == "error" or (completed and not outputs):
+                        details=[]
+                        for msg in messages:
+                            try:
+                                kind,payload=msg
+                            except Exception:
+                                continue
+                            if kind == "execution_error" and isinstance(payload,dict):
+                                node_id=payload.get("node_id")
+                                node_type=payload.get("node_type")
+                                exc_type=payload.get("exception_type")
+                                exc_msg=payload.get("exception_message")
+                                tb=payload.get("traceback") or []
+                                details.append(
+                                    f"node {node_id} ({node_type}): {exc_type}: {exc_msg}"
+                                    + (f" | {tb[-1]}" if tb else "")
+                                )
+                            elif kind in {"execution_interrupted","execution_cached"}:
+                                details.append(f"{kind}: {payload}")
+                        if not details:
+                            details.append(json.dumps(status,default=str)[:4000])
+                        raise RuntimeError("ComfyUI execution failed: " + " ; ".join(details))
+
                     output_node = str(config.get("output_node", ""))
                     candidate = outputs.get(output_node, {}) if output_node else {}
                     files = candidate.get("gifs") or candidate.get("images") or candidate.get("videos") or []
                     if not files:
-                        for node in outputs.values():
+                        for node_id,node in outputs.items():
                             files.extend(node.get("gifs") or node.get("videos") or node.get("images") or [])
                     if not files:
-                        raise RuntimeError("ComfyUI completed but the configured output node returned no file.")
+                        raise RuntimeError(
+                            "ComfyUI completed without a usable output file. "
+                            f"Configured output node={output_node}; output nodes={list(outputs.keys())}; "
+                            f"status={status_str or 'unknown'}."
+                        )
                     target = Path(values["output_path"])
                     target.parent.mkdir(parents=True, exist_ok=True)
 
