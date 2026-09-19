@@ -70,8 +70,13 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
        return;
      }
      if(pending.length>0){
-       await confirmSelectedSpeakers();
-       active=await api<Project>(`/api/projects/${active.id}`);
+       const confirmed=await api<any>(`/api/projects/${active.id}/confirm-speakers?language=${lang}`,{method:'POST'});
+       if(confirmed.project){active=confirmed.project;setP(active)}
+       if(confirmed.missing?.length){
+         setShowSpeakerReview(true);
+         setMsg(`${confirmed.missing.length} dialogue line(s) still need a speaker before the full movie can be generated.`);
+         return;
+       }
      }
      setMsg('Queuing full movie...');
      await api(`/api/projects/${active.id}/render-story?language=${lang}`,{method:'POST'});
@@ -99,7 +104,26 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
    </div>)}
    <div className="toolbar" style={{marginTop:16}}>
      <button className="btn" onClick={()=>setShowSpeakerReview(false)}>Close</button>
-     <button className="btn primary" disabled={reviewRows.some(({block}:any)=>!String(block.speaker||'').trim())} onClick={async()=>{await confirmSelectedSpeakers();setShowSpeakerReview(false);await renderFull()}}>Generate Full Movie</button>
+     <button className="btn primary" onClick={async()=>{
+       setBusy(true);
+       try{
+         const lang=p.settings.language==='pt-br'?'pt-br':'en';
+         const result=await api<any>(`/api/projects/${p.id}/confirm-speakers?language=${lang}`,{method:'POST'});
+         if(result.project)setP(result.project);
+         if(result.missing?.length){
+           setMsg(`${result.missing.length} dialogue line(s) still have no speaker selected. Please choose a speaker for the blank dropdowns.`);
+           return;
+         }
+         setShowSpeakerReview(false);
+         setMsg('Queuing full movie...');
+         await api(`/api/projects/${p.id}/render-story?language=${lang}`,{method:'POST'});
+         setMsg('Full movie queued.');
+       }catch(e:any){
+         setMsg(e?.message||'Could not queue the full movie.');
+       }finally{
+         setBusy(false);
+       }
+     }}>{busy?'Working...':'Generate Full Movie'}</button>
    </div>
  </div></div>}<div className="toolbar"><button className="btn" onClick={()=>switchLang('en')}>English</button><button className="btn" onClick={()=>switchLang('pt-br')}>Português Brasileiro</button><button className="btn primary" disabled={busy} onClick={renderFull}>{busy?'Working...':'Generate Full Movie'}</button><button className="btn" onClick={()=>api(`/api/projects/${p.id}/open-folder`,{method:'POST'})}>Open Project Folder</button></div><h1>{p.title}</h1><div className="two"><div className="card"><h3>Story text</h3><textarea style={{width:'100%',minHeight:160}} value={text} onChange={e=>setText(e.target.value)} placeholder="Paste one story here..."/><div className="toolbar"><button className="btn primary" onClick={()=>importStory(undefined,text)}>Import pasted text</button><label className="btn">Import DOCX/TXT/MD<input hidden type="file" accept=".docx,.txt,.md" onChange={e=>e.target.files&&importStory(e.target.files[0])}/></label></div></div><div className="card"><h3>Output</h3>
 <div className="card" style={{marginBottom:14,background:'#f7f8f5'}}>
