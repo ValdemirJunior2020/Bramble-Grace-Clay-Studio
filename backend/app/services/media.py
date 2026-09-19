@@ -11,7 +11,7 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v5"
+RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v6"
 TTS_CACHE_VERSION = "2026-09-19-voice-v3"
 
 def require_ffmpeg()->str:
