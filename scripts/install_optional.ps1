@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][ValidateSet('rhubarb','chatterbox','comfyui')][string]$Component)
+param([Parameter(Mandatory=$true)][ValidateSet('rhubarb','chatterbox','comfyui','wan22')][string]$Component)
 
 $ErrorActionPreference='Stop'
 $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -138,6 +138,55 @@ if($Component -eq 'chatterbox'){
   }
   if(-not(Test-Path $marker)){throw 'Chatterbox preload finished without creating the ready marker.'}
   Write-Host 'Chatterbox runtime installed and multilingual model cached.' -ForegroundColor Green
+  exit 0
+}
+
+if($Component -eq 'wan22'){
+  $comfy=Join-Path $Models 'comfyui'
+  if(-not(Test-Path (Join-Path $comfy 'main.py'))){
+    throw 'ComfyUI is not installed yet. Run INSTALL.bat first, then run INSTALL-WAN22.bat.'
+  }
+
+  $items=@(
+    @{
+      Url='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors'
+      Path=Join-Path $comfy 'models\diffusion_models\wan2.2_ti2v_5B_fp16.safetensors'
+    },
+    @{
+      Url='https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors'
+      Path=Join-Path $comfy 'models\text_encoders\umt5_xxl_fp8_e4m3fn_scaled.safetensors'
+    },
+    @{
+      Url='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors'
+      Path=Join-Path $comfy 'models\vae\wan2.2_vae.safetensors'
+    }
+  )
+
+  foreach($item in $items){
+    $dir=Split-Path $item.Path -Parent
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if(Test-Path $item.Path){
+      Write-Host "Already installed: $(Split-Path $item.Path -Leaf)" -ForegroundColor Green
+      continue
+    }
+    $partial=$item.Path+'.partial'
+    Remove-Item $partial -Force -ErrorAction SilentlyContinue
+    Write-Host "Downloading $(Split-Path $item.Path -Leaf)..." -ForegroundColor Cyan
+    try{
+      if(Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue){
+        Start-BitsTransfer -Source $item.Url -Destination $partial -DisplayName 'Bramble Grace Wan 2.2 model'
+      } else {
+        Invoke-WebRequest -UseBasicParsing -Uri $item.Url -OutFile $partial
+      }
+      Move-Item $partial $item.Path -Force
+    } catch {
+      Remove-Item $partial -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  Write-Host ''
+  Write-Host 'Wan 2.2 TI2V 5B is installed for AI Clay Performance.' -ForegroundColor Green
+  Write-Host 'Restart Clay Studio, choose AI Clay Performance, and select the Wan 2.2 5B workflow.' -ForegroundColor Green
   exit 0
 }
 
