@@ -30,6 +30,15 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
  const[showSpeakerReview,setShowSpeakerReview]=useState(false);
  const noScript=p.scenes.length>0&&p.scenes.every((s:Scene)=>s.blocks.length===0);
  const unresolved=p.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker)).map((b:any)=>({scene:s,block:b})));
+ const missingSpeakerCount=unresolved.filter(({block}:any)=>!block.speaker).length;
+ const confirmSelectedSpeakers=async()=>{
+   const scenes=new Map<string,Scene>();
+   unresolved.forEach(({scene}:any)=>scenes.set(scene.id,scene));
+   for(const scene of scenes.values()){
+     const blocks=scene.blocks.map((b:any)=>b.type==='dialogue'&&b.speaker?{...b,needs_review:false,speaker_confidence:1}:b);
+     await patchScene(scene,{blocks});
+   }
+ };
  const renderFull=async()=>{
    if(busy)return;
    setBusy(true);
@@ -51,10 +60,15 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
        return;
      }
      const pending=active.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker)));
-     if(pending.length>0){
+     const missing=pending.filter((b:any)=>!b.speaker);
+     if(missing.length>0){
        setShowSpeakerReview(true);
-       setMsg(`${pending.length} dialogue line(s) need a speaker before the full movie can be generated.`);
+       setMsg(`${missing.length} dialogue line(s) still need a speaker before the full movie can be generated.`);
        return;
+     }
+     if(pending.length>0){
+       await confirmSelectedSpeakers();
+       active=await api<Project>(`/api/projects/${active.id}`);
      }
      setMsg('Queuing full movie...');
      await api(`/api/projects/${active.id}/render-story?language=${lang}`,{method:'POST'});
@@ -67,7 +81,7 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
  };
  return <>{showSpeakerReview&&<div className="modal"><div className="modalbox">
    <h2>Speaker Review Required</h2>
-   <p>Choose who is speaking for each dialogue line below. Narration is already assigned automatically.</p>
+   <p>Choose who is speaking for each dialogue line below. Any line that already shows a selected speaker is ready; only blank dropdowns will block the movie.</p>
    {unresolved.length===0?<div className="pill ok">All dialogue speakers are confirmed.</div>:unresolved.map(({scene,block}:any)=><div className="card" key={block.id} style={{marginBottom:10}}>
      <div className="muted">Scene {scene.number}</div>
      <p style={{margin:'8px 0 10px'}}><b>“{block.text}”</b></p>
@@ -82,7 +96,7 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
    </div>)}
    <div className="toolbar" style={{marginTop:16}}>
      <button className="btn" onClick={()=>setShowSpeakerReview(false)}>Close</button>
-     <button className="btn primary" disabled={unresolved.length>0} onClick={()=>{setShowSpeakerReview(false);renderFull()}}>Generate Full Movie</button>
+     <button className="btn primary" disabled={missingSpeakerCount>0} onClick={async()=>{await confirmSelectedSpeakers();setShowSpeakerReview(false);await renderFull()}}>Generate Full Movie</button>
    </div>
  </div></div>}<div className="toolbar"><button className="btn" onClick={()=>switchLang('en')}>English</button><button className="btn" onClick={()=>switchLang('pt-br')}>Português Brasileiro</button><button className="btn primary" disabled={busy} onClick={renderFull}>{busy?'Working...':'Generate Full Movie'}</button><button className="btn" onClick={()=>api(`/api/projects/${p.id}/open-folder`,{method:'POST'})}>Open Project Folder</button></div><h1>{p.title}</h1><div className="two"><div className="card"><h3>Story text</h3><textarea style={{width:'100%',minHeight:160}} value={text} onChange={e=>setText(e.target.value)} placeholder="Paste one story here..."/><div className="toolbar"><button className="btn primary" onClick={()=>importStory(undefined,text)}>Import pasted text</button><label className="btn">Import DOCX/TXT/MD<input hidden type="file" accept=".docx,.txt,.md" onChange={e=>e.target.files&&importStory(e.target.files[0])}/></label></div></div><div className="card"><h3>Output</h3><div className="field"><label>Voice speed</label><input type="range" min={.5} max={2} step={.05} value={p.settings.voice_speed_global} onChange={e=>setP({...p,settings:{...p.settings,voice_speed_global:+e.target.value}})}/><b>{p.settings.voice_speed_global}x</b></div><div className="field"><label>Subtitle size</label><input type="number" value={p.settings.subtitle.font_size} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,font_size:+e.target.value}}})}/></div><div className="colorrow"><div className="field"><label>Subtitle color</label><input value={p.settings.subtitle.text_color} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,text_color:e.target.value}}})}/></div><input type="color" value={p.settings.subtitle.text_color} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,text_color:e.target.value}}})}/></div><button className="btn primary" onClick={()=>save(p)}>Save Settings</button></div></div>{noScript&&p.scenes.length>0&&<div className="pill warn" style={{marginBottom:12}}>No script/audio is assigned to these scenes yet. Paste/import the story before generating the movie.</div>}<div className="toolbar"><label className="btn primary">+ Add Scene Images<input hidden multiple type="file" accept="image/*" onChange={e=>addImages(e.target.files)}/></label></div>{p.scenes.map((s:Scene)=><div className="scene-row" key={s.id}><input className="bigcheck" type="checkbox"/><img src={media(s.source_image_url)}/><div><b>Scene {s.number}: {s.name}</b><div className="muted">{s.blocks.length} script blocks • {s.animation_mode}</div>{s.blocks.map((b:any)=><div className="speaker" key={b.id}><select value={b.speaker||''} onChange={e=>{const blocks=s.blocks.map((x:any)=>x.id===b.id?{...x,speaker:e.target.value,needs_review:false}:x);patchScene(s,{blocks})}}><option value="">Speaker needs review</option><option value="Narrator">Narrator</option>{chars.filter((c:Character)=>c.id!=='narrator').map((c:Character)=><option key={c.id} value={c.name}>{c.name}</option>)}</select><textarea value={b.text} readOnly/></div>)}</div><div><button className="btn" onClick={()=>move(s,-1)}>↑</button><button className="btn" onClick={()=>move(s,1)}>↓</button><button className="btn primary" onClick={()=>render('preview',s)}>Preview</button>{s.preview_url&&<video controls width="210" src={media(s.preview_url)}/>}</div></div>)}</>}
 function Characters({chars,refresh}:any){
