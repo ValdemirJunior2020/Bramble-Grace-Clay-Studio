@@ -8,6 +8,7 @@ from ..storage import load_character
 from ..engines.tts import generate_voice
 from ..engines.comfyui import ComfyUIAdapter
 from .subtitles import write_srt, write_vtt
+from .acting import acting_prompt
 
 def require_ffmpeg()->str:
     exe=shutil.which('ffmpeg')
@@ -25,7 +26,7 @@ def _duration(path:Path)->float:
     with wave.open(str(path),'rb') as w:return w.getnframes()/w.getframerate()
 
 def _sig(project:Project,scene:Scene,lang:str,preview:bool)->str:
-    payload={'img':scene.source_image,'blocks':[b.model_dump() for b in scene.blocks_by_language.get(lang,scene.blocks)],'lang':lang,'preview':preview,'w':project.settings.preview_width if preview else project.settings.width,'h':project.settings.preview_height if preview else project.settings.height,'fps':project.settings.preview_fps if preview else project.settings.fps,'subtitle':(scene.subtitle_override or project.settings.subtitle).model_dump(),'focus':scene.focus_points,'fill':project.settings.background_fill}
+    payload={'img':scene.source_image,'blocks':[b.model_dump() for b in scene.blocks_by_language.get(lang,scene.blocks)],'lang':lang,'preview':preview,'w':project.settings.preview_width if preview else project.settings.width,'h':project.settings.preview_height if preview else project.settings.height,'fps':project.settings.preview_fps if preview else project.settings.fps,'subtitle':(scene.subtitle_override or project.settings.subtitle).model_dump(),'focus':scene.focus_points,'fill':project.settings.background_fill,'acting_plan':[b.model_dump() for b in scene.acting_plan],'performance_enabled':scene.performance_enabled,'video_mode':project.settings.video_mode,'render_profile':project.settings.render_profile}
     return hashlib.sha256(json.dumps(payload,sort_keys=True,default=str).encode()).hexdigest()
 
 def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|None=None):
@@ -146,7 +147,8 @@ def render_cinematic_motion(project:Project,scene:Scene,audio:Path,cues:list,tar
     h=project.settings.preview_height if preview else project.settings.height
     fps=project.settings.preview_fps if preview else project.settings.fps
     story_text=' '.join(b.text.strip() for b in scene.blocks if b.text.strip())
-    prompt=(scene.motion_description.strip()+' '+story_text).strip()
+    performance=acting_prompt(scene.acting_plan) if scene.performance_enabled else ''
+    prompt=(project.settings.clay_style_prompt+' '+performance+' '+scene.motion_description.strip()+' Story context: '+story_text).strip()
     raw=target.with_name(target.stem+'-cinematic-raw.mp4')
     values={
         'input_image': scene.source_image,
