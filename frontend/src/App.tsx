@@ -25,5 +25,46 @@ export default function App(){
  </main></div>
 }
 function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchLang,render}:any){const[text,setText]=useState('');return <><div className="toolbar"><button className="btn" onClick={()=>switchLang('en')}>English</button><button className="btn" onClick={()=>switchLang('pt-br')}>Português Brasileiro</button><button className="btn primary" onClick={()=>render('render-story')}>Render Full Story</button><button className="btn" onClick={()=>api(`/api/projects/${p.id}/open-folder`,{method:'POST'})}>Open Project Folder</button></div><h1>{p.title}</h1><div className="two"><div className="card"><h3>Story text</h3><textarea style={{width:'100%',minHeight:160}} value={text} onChange={e=>setText(e.target.value)} placeholder="Paste one story here..."/><div className="toolbar"><button className="btn primary" onClick={()=>importStory(undefined,text)}>Import pasted text</button><label className="btn">Import DOCX/TXT/MD<input hidden type="file" accept=".docx,.txt,.md" onChange={e=>e.target.files&&importStory(e.target.files[0])}/></label></div></div><div className="card"><h3>Output</h3><div className="field"><label>Voice speed</label><input type="range" min={.5} max={2} step={.05} value={p.settings.voice_speed_global} onChange={e=>setP({...p,settings:{...p.settings,voice_speed_global:+e.target.value}})}/><b>{p.settings.voice_speed_global}x</b></div><div className="field"><label>Subtitle size</label><input type="number" value={p.settings.subtitle.font_size} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,font_size:+e.target.value}}})}/></div><div className="colorrow"><div className="field"><label>Subtitle color</label><input value={p.settings.subtitle.text_color} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,text_color:e.target.value}}})}/></div><input type="color" value={p.settings.subtitle.text_color} onChange={e=>setP({...p,settings:{...p.settings,subtitle:{...p.settings.subtitle,text_color:e.target.value}}})}/></div><button className="btn primary" onClick={()=>save(p)}>Save Settings</button></div></div><div className="toolbar"><label className="btn primary">+ Add Scene Images<input hidden multiple type="file" accept="image/*" onChange={e=>addImages(e.target.files)}/></label></div>{p.scenes.map((s:Scene)=><div className="scene-row" key={s.id}><input className="bigcheck" type="checkbox"/><img src={media(s.source_image_url)}/><div><b>Scene {s.number}: {s.name}</b><div className="muted">{s.blocks.length} script blocks • {s.animation_mode}</div>{s.blocks.map((b:any)=><div className="speaker" key={b.id}><select value={b.speaker||''} onChange={e=>{const blocks=s.blocks.map((x:any)=>x.id===b.id?{...x,speaker:e.target.value,needs_review:false}:x);patchScene(s,{blocks})}}><option value="">Speaker needs review</option><option value="Narrator">Narrator</option>{chars.filter((c:Character)=>c.id!=='narrator').map((c:Character)=><option key={c.id} value={c.name}>{c.name}</option>)}</select><textarea value={b.text} readOnly/></div>)}</div><div><button className="btn" onClick={()=>move(s,-1)}>↑</button><button className="btn" onClick={()=>move(s,1)}>↓</button><button className="btn primary" onClick={()=>render('preview',s)}>Preview</button>{s.preview_url&&<video controls width="210" src={media(s.preview_url)}/>}</div></div>)}</>}
-function Characters({chars,refresh}:any){return <><h1>Characters & Voices</h1><div className="grid">{chars.map((c:Character)=><div className="card" key={c.id}><h3>{c.name}</h3><div className="muted">{c.species}</div><div className="field"><label>English speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_en.speed} onChange={async e=>{c.voice_en.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div><div className="field"><label>PT-BR speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_pt_br.speed} onChange={async e=>{c.voice_pt_br.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div></div>)}</div></>}
+function Characters({chars,refresh}:any){
+ const uploadFor=async(c:Character,files:FileList|null)=>{
+   if(!files||files.length===0)return;
+   const fd=new FormData();Array.from(files).forEach(f=>fd.append('files',f));
+   await api(`/api/characters/${c.id}/references`,{method:'POST',body:fd});
+   await refresh();
+ };
+ const bulkUpload=async(files:FileList|null)=>{
+   if(!files)return;
+   const unmatched:string[]=[];
+   for(const file of Array.from(files)){
+     const base=file.name.toLowerCase().replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ');
+     const match=chars.find((c:Character)=>{
+       const name=c.name.toLowerCase();
+       const id=c.id.toLowerCase().replace(/[_-]+/g,' ');
+       return base===name||base===id||base.includes(name)||name.includes(base);
+     });
+     if(!match){unmatched.push(file.name);continue}
+     const fd=new FormData();fd.append('files',file);
+     await api(`/api/characters/${match.id}/references`,{method:'POST',body:fd});
+   }
+   await refresh();
+   if(unmatched.length)alert('Could not match: '+unmatched.join(', ')+'\nRename them Grace, Bramble, Pip, Oliver, Barnaby, etc. and try again.');
+ };
+ return <><h1>Characters & Voices</h1>
+   <div className="card" style={{marginBottom:16}}>
+     <h3>Character Faces</h3>
+     <p className="muted">Upload face/reference images named Grace, Bramble, Pip, Oliver, Barnaby, etc. The app will match them automatically by filename.</p>
+     <label className="btn primary">Upload Character Faces
+       <input hidden multiple type="file" accept="image/*" onChange={e=>bulkUpload(e.target.files)}/>
+     </label>
+   </div>
+   <div className="grid">{chars.map((c:Character)=><div className="card" key={c.id}>
+     <h3>{c.name}</h3><div className="muted">{c.species}</div>
+     <div className="muted" style={{margin:'8px 0'}}>{c.reference_images?.length||0} face/reference image(s) saved</div>
+     <label className="btn">Add {c.name} Face
+       <input hidden multiple type="file" accept="image/*" onChange={e=>uploadFor(c,e.target.files)}/>
+     </label>
+     <div className="field" style={{marginTop:12}}><label>English speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_en.speed} onChange={async e=>{c.voice_en.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div>
+     <div className="field"><label>PT-BR speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_pt_br.speed} onChange={async e=>{c.voice_pt_br.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div>
+   </div>)}</div></>
+}
 function System({data}:any){if(!data)return <p>Open System Status again to refresh.</p>;return <><h1>System Status</h1><div className="card">{Object.entries(data).filter(([k])=>!['modes'].includes(k)).map(([k,v])=><div className="status" key={k}><span>{k}</span><strong>{typeof v==='object'?JSON.stringify(v):String(v??'Not Installed')}</strong></div>)}</div></>}
