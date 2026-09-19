@@ -17,6 +17,35 @@ _MODEL_CACHE: dict[str, object] = {}
 CHATTERBOX_SERVICE_URL = os.getenv("CHATTERBOX_SERVICE_URL", "http://127.0.0.1:8766").rstrip("/")
 
 
+def validate_voice_file(path: Path) -> bool:
+    """Reject empty, near-silent, or malformed WAV files before they enter a movie."""
+    if not path.exists() or path.stat().st_size < 2048:
+        return False
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        return True
+    try:
+        probe = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True, text=True, timeout=20
+        )
+        duration = float((probe.stdout or "0").strip() or 0)
+        if duration < 0.08:
+            return False
+        check = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30
+        )
+        text = (check.stderr or "") + (check.stdout or "")
+        m = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", text)
+        if m and float(m.group(1)) < -45.0:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def split_text(text: str, limit: int = 260) -> list[str]:
     text = re.sub(r"\s+", " ", text.strip())
     if len(text) <= limit:
@@ -180,13 +209,19 @@ def generate_voice(text: str, outfile: Path, language: str, settings: VoiceSetti
         td_path = Path(td)
         for i, chunk in enumerate(chunks):
             raw = td_path / f"chunk-{i:03}.wav"
+            used_engine = engine
             if engine == "chatterbox":
-                if not _generate_chatterbox_service(chunk, raw, language, settings):
-                    generate_chatterbox(chunk, raw, language, settings)
+                try:
+                    if not _generate_chatterbox_service(chunk, raw, language, settings):
+                        generate_chatterbox(chunk, raw, language, settings)
+                except Exception:
+                    used_engine = "sapi"
+                    _generate_sapi(chunk, raw, language, VoiceSettings(**{**settings.model_dump(), "speed": 1.0, "engine": "sapi"}))
             elif engine == "sapi":
                 _generate_sapi(chunk, raw, language, VoiceSettings(**{**settings.model_dump(), "speed": 1.0}))
             else:
                 raise RuntimeError(f"Unknown TTS engine: {engine}")
+
             norm = td_path / f"chunk-{i:03}-norm.wav"
             if shutil.which("ffmpeg"):
                 subprocess.run([
@@ -195,6 +230,21 @@ def generate_voice(text: str, outfile: Path, language: str, settings: VoiceSetti
                 ], check=True)
             else:
                 shutil.copy2(raw, norm)
+
+            if not validate_voice_file(norm):
+                if used_engine != "sapi":
+                    raw.unlink(missing_ok=True)
+                    norm.unlink(missing_ok=True)
+                    _generate_sapi(chunk, raw, language, VoiceSettings(**{**settings.model_dump(), "speed": 1.0, "engine": "sapi"}))
+                    if shutil.which("ffmpeg"):
+                        subprocess.run([
+                            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(raw),
+                            "-af", "loudnorm=I=-16:LRA=7:TP=-1.5", "-ar", "48000", "-ac", "2", str(norm)
+                        ], check=True)
+                    else:
+                        shutil.copy2(raw, norm)
+                if not validate_voice_file(norm):
+                    raise RuntimeError("Generated voice audio is invalid or near-silent.")
             chunk_files.append(norm)
 
         joined = td_path / "joined.wav"
