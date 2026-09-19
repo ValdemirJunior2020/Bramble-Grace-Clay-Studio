@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 from ..models import Project, Scene
 from ..storage import load_character
 from ..engines.tts import generate_voice
+from ..engines.comfyui import ComfyUIAdapter
 from .subtitles import write_srt, write_vtt
 
 def require_ffmpeg()->str:
@@ -133,14 +134,63 @@ def _burn(video:Path,srt:Path,target:Path,style)->Path:
         raise RuntimeError(f'Subtitle burn-in failed: {details[-3000:]}')
     return target
 
+def render_cinematic_motion(project:Project,scene:Scene,audio:Path,cues:list,target:Path,preview:bool=False,progress:Callable|None=None)->Path:
+    workflow=project.settings.cinematic_workflow
+    if not workflow:
+        raise RuntimeError('Cinematic mode is selected, but no ComfyUI video workflow is configured. Open Video Settings and select an installed image-to-video workflow.')
+    adapter=ComfyUIAdapter()
+    available=adapter.availability()
+    if not available.get('available'):
+        raise RuntimeError('Cinematic mode requires ComfyUI to be running.')
+    w=project.settings.preview_width if preview else project.settings.width
+    h=project.settings.preview_height if preview else project.settings.height
+    fps=project.settings.preview_fps if preview else project.settings.fps
+    story_text=' '.join(b.text.strip() for b in scene.blocks if b.text.strip())
+    prompt=(scene.motion_description.strip()+' '+story_text).strip()
+    raw=target.with_name(target.stem+'-cinematic-raw.mp4')
+    values={
+        'input_image': scene.source_image,
+        'audio': str(audio),
+        'prompt': prompt,
+        'negative_prompt': 'deformed face, extra limbs, identity change, warped hands, duplicate character, random mouth movement',
+        'width': w,
+        'height': h,
+        'fps': fps,
+        'duration': _duration(audio),
+        'motion_strength': project.settings.cinematic_motion_strength,
+        'output_path': str(raw),
+    }
+    if progress: progress(.05,'Starting Cinematic Generation')
+    adapter.generate(workflow,values,progress_cb=progress)
+    if not raw.exists():
+        raise RuntimeError('The selected cinematic workflow completed without producing a video file.')
+    ff=require_ffmpeg()
+    target.parent.mkdir(parents=True,exist_ok=True)
+    result=subprocess.run([
+        ff,'-y','-hide_banner','-loglevel','error',
+        '-i',str(raw),'-i',str(audio),
+        '-map','0:v:0','-map','1:a:0',
+        '-c:v','libx264','-preset','veryfast','-crf','21',
+        '-c:a','aac','-b:a','192k','-shortest',str(target)
+    ],capture_output=True,text=True)
+    raw.unlink(missing_ok=True)
+    if result.returncode!=0:
+        details=(result.stderr or result.stdout or f'FFmpeg exited with code {result.returncode}').strip()
+        raise RuntimeError(f'Cinematic audio mux failed: {details[-3000:]}')
+    return target
+
 def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,progress:Callable|None=None)->Path:
     scene.blocks=scene.blocks_by_language.get(language,scene.blocks); sig=_sig(project,scene,language,preview); paths=scene.preview_paths if preview else scene.render_paths; sigs=scene.preview_signatures if preview else scene.render_signatures
     if paths.get(language) and sigs.get(language)==sig and Path(paths[language]).exists():return Path(paths[language])
     audio,cues,_=build_scene_audio(project,scene,language,progress); sub=Path(project.folder)/'subtitles'/language; srt=write_srt(cues,sub/f'{scene.id}.srt');write_vtt(cues,sub/f'{scene.id}.vtt')
     outdir=Path(project.folder)/('cache/previews' if preview else f'scenes/{language}');outdir.mkdir(parents=True,exist_ok=True);base=outdir/f'{scene.number:03}-{scene.id}-base.mp4'
     style=scene.subtitle_override or project.settings.subtitle
-    render_clay_motion(project,scene,audio,[],base,preview,progress,subtitle_cues=cues,subtitle_style=style);final=outdir/f'{scene.number:03}-{scene.id}.mp4'
-    base.replace(final)
+    final=outdir/f'{scene.number:03}-{scene.id}.mp4'
+    if project.settings.video_mode=='cinematic':
+        render_cinematic_motion(project,scene,audio,cues,final,preview,progress)
+    else:
+        render_clay_motion(project,scene,audio,[],base,preview,progress,subtitle_cues=cues,subtitle_style=style)
+        base.replace(final)
     paths[language]=str(final);sigs[language]=sig;scene.render_status='complete';scene.blocks_by_language[language]=scene.blocks
     if preview:scene.preview_path=str(final);scene.preview_signature=sig
     else:scene.render_path=str(final);scene.render_signature=sig
