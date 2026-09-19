@@ -12,6 +12,7 @@ from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
 RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v5"
+TTS_CACHE_VERSION = "2026-09-19-voice-v3"
 
 def require_ffmpeg()->str:
     exe=shutil.which('ffmpeg')
@@ -42,11 +43,25 @@ def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|Non
             try:c=load_character(cid)
             except Exception:c=load_character('narrator')
             settings=c.voice_pt_br if lang=='pt-br' else c.voice_en
-            if out.exists() and not validate_voice_file(out):
+            voice_sig=hashlib.sha256(json.dumps({
+                'version':TTS_CACHE_VERSION,
+                'text':b.text,
+                'speaker':speaker,
+                'language':lang,
+                'settings':settings.model_dump(),
+                'global_speed':project.settings.voice_speed_global
+            },sort_keys=True,default=str).encode()).hexdigest()
+            sig_path=out.with_suffix(out.suffix+'.sig')
+            cached_sig=sig_path.read_text(encoding='utf-8').strip() if sig_path.exists() else ''
+            if out.exists() and (cached_sig!=voice_sig or not validate_voice_file(out)):
                 out.unlink(missing_ok=True)
+                sig_path.unlink(missing_ok=True)
             if not out.exists():
                 generate_voice(b.text,out,lang,settings,project.settings.voice_speed_global)
+                sig_path.write_text(voice_sig,encoding='utf-8')
             if not validate_voice_file(out):
+                out.unlink(missing_ok=True)
+                sig_path.unlink(missing_ok=True)
                 raise RuntimeError(f'Voice generation failed validation for {speaker}.')
             dur=_duration(out); cues.append((t,t+dur,b.text)); t+=dur
         elif b.type=='pause':
@@ -250,6 +265,8 @@ def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,pro
     elif project.settings.video_mode=='cinematic':
         render_cinematic_motion(project,scene,audio,cues,final,preview,progress)
     else:
+        if project.settings.mode=='bramble':
+            raise RuntimeError('Legacy Clay Motion is disabled for Bramble & Grace because it does not provide real character acting. Select AI Clay Performance in Video Settings.')
         render_clay_motion(project,scene,audio,[],base,preview,progress,subtitle_cues=cues,subtitle_style=style)
         base.replace(final)
     paths[language]=str(final);sigs[language]=sig;scene.render_status='complete';scene.blocks_by_language[language]=scene.blocks
