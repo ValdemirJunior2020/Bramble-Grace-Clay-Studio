@@ -75,6 +75,42 @@ async def add_scenes(pid:str,files:list[UploadFile]=File(...)):
         sid=uuid.uuid4().hex[:12];target=folder/f'{len(p.scenes)+1:03}-{sid}{ext}';target.write_bytes(await f.read());p.scenes.append(Scene(id=sid,number=len(p.scenes)+1,name=f'Scene {len(p.scenes)+1:02}',source_image=str(target)))
     if p.scenes and not p.thumbnail:p.thumbnail=p.scenes[0].source_image
     _assign(p);save_project(p);return public(p)
+@app.post('/api/projects/{pid}/scenes/{sid}/replace-image')
+async def replace_scene_image(pid:str,sid:str,file:UploadFile=File(...)):
+    p=load_project(pid);s=next((x for x in p.scenes if x.id==sid),None)
+    if not s:raise HTTPException(404,'Scene not found')
+    ext=Path(file.filename or '').suffix.lower()
+    if ext not in {'.png','.jpg','.jpeg','.webp','.bmp'}:raise HTTPException(400,'Please choose a PNG, JPG, JPEG, WEBP, or BMP image.')
+    folder=Path(p.folder)/'images';folder.mkdir(parents=True,exist_ok=True)
+    old_source=Path(s.source_image)
+    target=folder/f'{s.number:03}-{s.id}-replacement-{uuid.uuid4().hex[:8]}{ext}'
+    target.write_bytes(await file.read())
+    # Remove only generated media for this scene. Story text, speakers, acting plan,
+    # scene order and all other scene metadata remain intact.
+    generated=set()
+    if s.preview_path:generated.add(s.preview_path)
+    if s.render_path:generated.add(s.render_path)
+    generated.update((s.preview_paths or {}).values())
+    generated.update((s.render_paths or {}).values())
+    for value in generated:
+        try:
+            path=Path(value)
+            if path.exists():path.unlink()
+        except Exception:
+            pass
+    s.source_image=str(target)
+    s.preview_path=None;s.preview_signature=None;s.preview_paths={};s.preview_signatures={}
+    s.render_path=None;s.render_signature=None;s.render_paths={};s.render_signatures={}
+    s.render_status='pending';s.error=None
+    if p.thumbnail and Path(p.thumbnail)==old_source:p.thumbnail=str(target)
+    save_project(p)
+    # Delete the old scene source only after the new project state has been saved.
+    try:
+        if old_source.exists() and old_source.parent.resolve()==folder.resolve():old_source.unlink()
+    except Exception:
+        pass
+    return public(p)
+
 @app.patch('/api/projects/{pid}/scenes/{sid}')
 def patch_scene(pid:str,sid:str,patch:ScenePatch):
     p=load_project(pid);s=next((x for x in p.scenes if x.id==sid),None)
