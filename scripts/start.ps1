@@ -5,6 +5,7 @@ $Runtime=Join-Path $Root 'runtime';New-Item -ItemType Directory -Force $Runtime|
 $PidFile=Join-Path $Runtime 'owned-pids.txt'
 function Record-Owned($proc,[string]$label){try{$ticks=$proc.StartTime.ToFileTimeUtc();Add-Content -Encoding UTF8 $PidFile "$($proc.Id)|$ticks|$label"}catch{}}
 $env:HF_HOME=Join-Path $Root 'data\models\huggingface'
+$env:PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True'
 $env:PATH=(Join-Path $Root 'data\models\rhubarb')+';'+$env:PATH
 function IsPortFree([int]$p){try{$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$p);$l.Start();$l.Stop();return $true}catch{return $false}}
 function IsHealthy($url){try{$r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $url;return $r.StatusCode -eq 200}catch{return $false}}
@@ -19,7 +20,7 @@ $comfy=Join-Path $Root 'data\models\comfyui';$comfyPy=Join-Path $comfy '.venv\Sc
 if(Test-Path (Join-Path $comfy 'main.py')){
   if(-not(IsHealthy "http://127.0.0.1:$comfyPort/system_stats")){
     if(-not(IsPortFree $comfyPort)){$comfyPort=FreePort 8189}
-    if(Test-Path $comfyPy){$proc=Start-Process $comfyPy -ArgumentList @('main.py','--listen','127.0.0.1','--port',"$comfyPort") -WorkingDirectory $comfy -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Logs 'comfyui.log') -RedirectStandardError (Join-Path $Logs 'comfyui-error.log') -PassThru;Record-Owned $proc 'comfyui'}
+    if(Test-Path $comfyPy){$proc=Start-Process $comfyPy -ArgumentList @('main.py','--listen','127.0.0.1','--port',"$comfyPort",'--lowvram') -WorkingDirectory $comfy -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Logs 'comfyui.log') -RedirectStandardError (Join-Path $Logs 'comfyui-error.log') -PassThru;Record-Owned $proc 'comfyui'}
   }
 }
 $env:COMFYUI_URL="http://127.0.0.1:$comfyPort"
