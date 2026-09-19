@@ -28,6 +28,7 @@ class ComfyUIAdapter:
         for config in WORKFLOWS_DIR.glob("*.adapter.json"):
             try:
                 data = json.loads(config.read_text(encoding="utf-8"))
+                data["id"] = config.name.removesuffix(".adapter.json")
                 data["config_file"] = str(config)
                 rows.append(data)
             except Exception:
@@ -49,10 +50,21 @@ class ComfyUIAdapter:
             raise KeyError(f"Workflow node {node_id} is missing")
         prompt[node_id].setdefault("inputs", {})[field] = value
 
+    def _resolve_config_path(self, workflow_name: str) -> Path:
+        direct = WORKFLOWS_DIR / f"{workflow_name}.adapter.json"
+        if direct.exists():
+            return direct
+        for path in WORKFLOWS_DIR.glob("*.adapter.json"):
+            try:
+                data=json.loads(path.read_text(encoding="utf-8"))
+                if workflow_name in {data.get("name"),data.get("label"),path.name.removesuffix(".adapter.json")}:
+                    return path
+            except Exception:
+                continue
+        raise FileNotFoundError(f"Missing workflow adapter for: {workflow_name}")
+
     def prepare_prompt(self, workflow_name: str, values: dict) -> tuple[dict, dict]:
-        config_path = WORKFLOWS_DIR / f"{workflow_name}.adapter.json"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Missing workflow adapter: {config_path.name}")
+        config_path = self._resolve_config_path(workflow_name)
         config = json.loads(config_path.read_text(encoding="utf-8"))
         workflow_file = WORKFLOWS_DIR / config["workflow"]
         prompt = json.loads(workflow_file.read_text(encoding="utf-8"))
