@@ -10,6 +10,9 @@ from ..engines.comfyui import ComfyUIAdapter
 from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
+# Bump whenever rendering behavior changes so old scene videos are not reused.
+RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v5"
+
 def require_ffmpeg()->str:
     exe=shutil.which('ffmpeg')
     if not exe: raise RuntimeError('FFmpeg is not installed.')
@@ -26,7 +29,7 @@ def _duration(path:Path)->float:
     with wave.open(str(path),'rb') as w:return w.getnframes()/w.getframerate()
 
 def _sig(project:Project,scene:Scene,lang:str,preview:bool)->str:
-    payload={'img':scene.source_image,'blocks':[b.model_dump() for b in scene.blocks_by_language.get(lang,scene.blocks)],'lang':lang,'preview':preview,'w':project.settings.preview_width if preview else project.settings.width,'h':project.settings.preview_height if preview else project.settings.height,'fps':project.settings.preview_fps if preview else project.settings.fps,'subtitle':(scene.subtitle_override or project.settings.subtitle).model_dump(),'focus':scene.focus_points,'fill':project.settings.background_fill,'acting_plan':[b.model_dump() for b in scene.acting_plan],'performance_enabled':scene.performance_enabled,'video_mode':project.settings.video_mode,'render_profile':project.settings.render_profile}
+    payload={'renderer_version':RENDER_ENGINE_VERSION,'img':scene.source_image,'blocks':[b.model_dump() for b in scene.blocks_by_language.get(lang,scene.blocks)],'lang':lang,'preview':preview,'w':project.settings.preview_width if preview else project.settings.width,'h':project.settings.preview_height if preview else project.settings.height,'fps':project.settings.preview_fps if preview else project.settings.fps,'subtitle':(scene.subtitle_override or project.settings.subtitle).model_dump(),'focus':scene.focus_points,'fill':project.settings.background_fill,'acting_plan':[b.model_dump() for b in scene.acting_plan],'performance_enabled':scene.performance_enabled,'video_mode':project.settings.video_mode,'render_profile':project.settings.render_profile,'clay_workflow':project.settings.clay_performance_workflow,'clay_strength':project.settings.clay_performance_strength,'cinematic_workflow':project.settings.cinematic_workflow,'cinematic_strength':project.settings.cinematic_motion_strength}
     return hashlib.sha256(json.dumps(payload,sort_keys=True,default=str).encode()).hexdigest()
 
 def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|None=None):
@@ -235,7 +238,9 @@ def render_cinematic_motion(project:Project,scene:Scene,audio:Path,cues:list,tar
 
 def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,progress:Callable|None=None)->Path:
     scene.blocks=scene.blocks_by_language.get(language,scene.blocks); sig=_sig(project,scene,language,preview); paths=scene.preview_paths if preview else scene.render_paths; sigs=scene.preview_signatures if preview else scene.render_signatures
-    if paths.get(language) and sigs.get(language)==sig and Path(paths[language]).exists():return Path(paths[language])
+    if paths.get(language) and sigs.get(language)==sig and Path(paths[language]).exists():
+        if progress: progress(1.0,'Using cached scene')
+        return Path(paths[language])
     audio,cues,_=build_scene_audio(project,scene,language,progress); sub=Path(project.folder)/'subtitles'/language; srt=write_srt(cues,sub/f'{scene.id}.srt');write_vtt(cues,sub/f'{scene.id}.vtt')
     outdir=Path(project.folder)/('cache/previews' if preview else f'scenes/{language}');outdir.mkdir(parents=True,exist_ok=True);base=outdir/f'{scene.number:03}-{scene.id}-base.mp4'
     style=scene.subtitle_override or project.settings.subtitle
