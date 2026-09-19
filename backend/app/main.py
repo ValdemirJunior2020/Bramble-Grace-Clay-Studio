@@ -162,6 +162,10 @@ def render_one(pid:str,sid:str,language:str='en'):
 @app.post('/api/projects/{pid}/render-story')
 def render_full(pid:str,language:str='en'):
     p=load_project(pid)
+    blocks=[b for s in p.scenes for b in s.blocks_by_language.get(language,s.blocks)]
+    spoken=[b for b in blocks if b.type in {'dialogue','narrator'} and b.text.strip()]
+    if not spoken:
+        raise HTTPException(409,'No narration/dialogue is assigned to the scenes. Import the story text first so audio can be generated.')
     if any(_review(s.blocks_by_language.get(language,s.blocks)) for s in p.scenes):raise HTTPException(409,'Speaker review is required before final rendering.')
     def run(progress):
         p=load_project(pid);path=render_story(p,language,progress);save_project(p);return path
