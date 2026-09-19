@@ -137,6 +137,29 @@ async def voice_ref(cid:str,language:str=Form(...),file:UploadFile=File(...)):
 def voice_preview(cid:str,payload:dict=Body(...)):
     c=load_character(cid);lang=payload.get('language','en');settings=c.voice_pt_br if lang=='pt-br' else c.voice_en;settings=VoiceSettings.model_validate({**settings.model_dump(),**payload.get('settings',{})});target=CHARACTERS_DIR/cid/'voices'/f'preview-{lang}.wav';generate_voice(payload.get('text','Hello'),target,lang,settings);return {'url':_url(str(target))}
 
+@app.post('/api/projects/{pid}/confirm-speakers')
+def confirm_speakers(pid:str, language:str='en'):
+    p=load_project(pid)
+    missing=[]
+    for s in p.scenes:
+        blocks=s.blocks_by_language.get(language,s.blocks)
+        changed=False
+        for b in blocks:
+            if b.type!='dialogue':
+                continue
+            if b.speaker and str(b.speaker).strip():
+                b.needs_review=False
+                b.speaker_confidence=1.0
+                changed=True
+            else:
+                missing.append({'scene':s.number,'block_id':b.id,'text':b.text})
+        if changed:
+            s.blocks_by_language[language]=blocks
+            if p.settings.language==language:
+                s.blocks=blocks
+    save_project(p)
+    return {'ok':len(missing)==0,'missing':missing,'project':public(p)}
+
 @app.get('/api/queue')
 def queue():return [j.model_dump() for j in render_queue.list()]
 @app.post('/api/queue/pause')
