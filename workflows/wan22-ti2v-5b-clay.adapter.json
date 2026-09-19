@@ -1,0 +1,47 @@
+{
+  "name": "Wan 2.2 TI2V 5B - AI Clay Performance",
+  "label": "Wan 2.2 5B — AI Clay Performance",
+  "workflow": "wan22-ti2v-5b-clay.json",
+  "workflow_format": "frontend",
+  "source": "Comfy-Org/workflow_templates video_wan2_2_5B_ti2v.json",
+  "minimum_vram_gb": 8,
+  "hardware_notes": "Balanced local image-to-video path. Uses ComfyUI native offloading; intended for the current 16 GB AMD setup.",
+  "output_node": "58",
+  "enable_nodes": [
+    "56"
+  ],
+  "mapping": {
+    "input_image": {
+      "node": "56",
+      "field": "image"
+    },
+    "prompt": {
+      "node": "6",
+      "field": "text"
+    },
+    "negative_prompt": {
+      "node": "7",
+      "field": "text"
+    },
+    "seed": {
+      "node": "3",
+      "field": "seed"
+    },
+    "width": {
+      "node": "55",
+      "field": "width"
+    },
+    "height": {
+      "node": "55",
+      "field": "height"
+    },
+    "length": {
+      "node": "55",
+      "field": "length"
+    },
+    "fps": {
+      "node": "57",
+      "field": "fps"
+    }
+  }
+}
