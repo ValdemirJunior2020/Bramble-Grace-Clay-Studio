@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][ValidateSet('rhubarb','chatterbox','comfyui','wan22')][string]$Component)
+param([Parameter(Mandatory=$true)][ValidateSet('rhubarb','chatterbox','comfyui','wan22','motionity')][string]$Component)
 
 $ErrorActionPreference='Stop'
 $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -138,6 +138,78 @@ if($Component -eq 'chatterbox'){
   }
   if(-not(Test-Path $marker)){throw 'Chatterbox preload finished without creating the ready marker.'}
   Write-Host 'Chatterbox runtime installed and multilingual model cached.' -ForegroundColor Green
+  exit 0
+}
+
+if($Component -eq 'motionity'){
+  $tools=Join-Path $Root 'data\tools'
+  $dest=Join-Path $tools 'motionity'
+  New-Item -ItemType Directory -Force -Path $tools | Out-Null
+
+  if(Test-Path (Join-Path $dest '.git')){
+    Write-Host 'Updating Motionity...' -ForegroundColor Cyan
+    git -C $dest pull --ff-only
+    if($LASTEXITCODE -ne 0){throw 'Could not update Motionity.'}
+  } elseif(Test-Path $dest){
+    Remove-Item $dest -Recurse -Force
+    git clone https://github.com/alyssaxuu/motionity.git $dest
+    if($LASTEXITCODE -ne 0){throw 'Could not clone Motionity.'}
+  } else {
+    git clone https://github.com/alyssaxuu/motionity.git $dest
+    if($LASTEXITCODE -ne 0){throw 'Could not clone Motionity.'}
+  }
+
+  $src=Join-Path $dest 'src'
+  $bridge=Join-Path $src 'bramble-bridge.js'
+  @'
+(function(){
+  function qs(name){return new URLSearchParams(window.location.search).get(name)}
+  async function boot(){
+    if(typeof window.jQuery==='undefined' || typeof saveFile!=='function' || typeof createThumbnail!=='function' || typeof saveAudio!=='function'){
+      return setTimeout(boot,250);
+    }
+    try{
+      var w=parseInt(qs('width')||'0',10), h=parseInt(qs('height')||'0',10);
+      if(w){ $('#canvas-w input').val(w).trigger('change'); }
+      if(h){ $('#canvas-h input').val(h).trigger('change'); }
+      var dur=parseFloat(qs('duration')||'0');
+      if(dur){ $('#canvas-duration input').val(dur.toFixed(2)).trigger('change'); }
+
+      var image=qs('image');
+      if(image && !sessionStorage.getItem('bramble-image-'+image)){
+        var blob=await fetch(image).then(function(r){if(!r.ok)throw new Error('Scene image fetch failed');return r.blob()});
+        var file=new File([blob],'bramble-scene.'+(blob.type.split('/')[1]||'png'),{type:blob.type||'image/png'});
+        var thumb=await createThumbnail(file,250);
+        await saveFile(dataURItoBlob(thumb),file,'image','Bramble & Grace Scene',true,false);
+        sessionStorage.setItem('bramble-image-'+image,'1');
+      }
+
+      var audio=qs('audio');
+      if(audio && !sessionStorage.getItem('bramble-audio-'+audio)){
+        var ablob=await fetch(audio).then(function(r){if(!r.ok)throw new Error('Scene audio fetch failed');return r.blob()});
+        var afile=new File([ablob],'scene-audio.wav',{type:ablob.type||'audio/wav'});
+        await saveAudio(afile);
+        sessionStorage.setItem('bramble-audio-'+audio,'1');
+      }
+
+      document.title='Bramble & Grace Scene Animator';
+    }catch(err){
+      console.error('Bramble Motionity bridge:',err);
+    }
+  }
+  window.addEventListener('load',function(){setTimeout(boot,700)});
+})();
+'@ | Set-Content -Encoding UTF8 $bridge
+
+  $index=Join-Path $src 'index.html'
+  $html=Get-Content $index -Raw
+  if($html -notmatch 'bramble-bridge\.js'){
+    $html=$html -replace '</body>','<script src="bramble-bridge.js"></script></body>'
+    Set-Content -Encoding UTF8 $index $html
+  }
+
+  Write-Host 'Motionity Scene Animator installed locally.' -ForegroundColor Green
+  Write-Host 'Restart Clay Studio. Each scene will have an Animate Scene button.' -ForegroundColor Green
   exit 0
 }
 
