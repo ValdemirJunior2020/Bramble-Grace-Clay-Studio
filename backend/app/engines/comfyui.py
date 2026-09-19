@@ -78,14 +78,13 @@ class ComfyUIAdapter:
                 if "input_image" in config.get("mapping", {}):
                     self._set_node_input(prompt, config["mapping"]["input_image"], uploaded_name)
             audio = values.get("audio")
-            if audio:
+            if audio and "audio" in config.get("mapping", {}):
                 p = Path(audio)
                 with p.open("rb") as fh:
                     r = client.post(f"{self.base_url}/upload/image", files={"image": (p.name, fh, "application/octet-stream")}, data={"overwrite": "true", "type": "input"})
                     r.raise_for_status()
                 uploaded_name = r.json().get("name", p.name)
-                if "audio" in config.get("mapping", {}):
-                    self._set_node_input(prompt, config["mapping"]["audio"], uploaded_name)
+                self._set_node_input(prompt, config["mapping"]["audio"], uploaded_name)
             r = client.post(f"{self.base_url}/prompt", json={"prompt": prompt, "client_id": client_id})
             r.raise_for_status()
             prompt_id = r.json()["prompt_id"]
