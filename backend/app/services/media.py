@@ -5,7 +5,7 @@ from typing import Callable
 from PIL import Image, ImageDraw, ImageFont
 from ..models import Project, Scene
 from ..storage import load_character
-from ..engines.tts import generate_voice
+from ..engines.tts import generate_voice, validate_voice_file
 from ..engines.comfyui import ComfyUIAdapter
 from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
@@ -39,7 +39,12 @@ def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|Non
             try:c=load_character(cid)
             except Exception:c=load_character('narrator')
             settings=c.voice_pt_br if lang=='pt-br' else c.voice_en
-            if not out.exists(): generate_voice(b.text,out,lang,settings,project.settings.voice_speed_global)
+            if out.exists() and not validate_voice_file(out):
+                out.unlink(missing_ok=True)
+            if not out.exists():
+                generate_voice(b.text,out,lang,settings,project.settings.voice_speed_global)
+            if not validate_voice_file(out):
+                raise RuntimeError(f'Voice generation failed validation for {speaker}.')
             dur=_duration(out); cues.append((t,t+dur,b.text)); t+=dur
         elif b.type=='pause':
             dur=float(b.duration or b.metadata.get('seconds',.5)); _silent_wav(out,dur); t+=dur
