@@ -90,9 +90,20 @@ def render_static(project:Project,scene:Scene,audio:Path,target:Path,preview=Fal
     return render_clay_motion(project,scene,audio,[],target,preview,progress)
 
 def _burn(video:Path,srt:Path,target:Path,style)->Path:
-    ff=require_ffmpeg(); esc=str(srt).replace('\\','/').replace(':','\\:').replace("'","\\'"); size=style.font_size
-    vf=f"subtitles='{esc}':force_style='FontName={style.font},FontSize={size},Outline={style.outline},Shadow={style.shadow},MarginV={style.bottom_margin}'"
-    subprocess.run([ff,'-y','-hide_banner','-loglevel','error','-i',str(video),'-vf',vf,'-c:v','libx264','-crf','20','-c:a','copy',str(target)],check=True);return target
+    ff=require_ffmpeg()
+    size=style.font_size
+    # Windows FFmpeg/libass can be fragile when a subtitles filter contains an
+    # absolute drive-letter path (C:\\...). Run from the subtitle directory
+    # and pass only the filename so the filter never has to parse a drive colon.
+    subtitle_name=srt.name.replace("'","\\'")
+    font=str(style.font).replace("'","")
+    vf=f"subtitles=filename='{subtitle_name}':force_style='FontName={font},FontSize={size},Outline={style.outline},Shadow={style.shadow},MarginV={style.bottom_margin}'"
+    cmd=[ff,'-y','-hide_banner','-loglevel','error','-i',str(video.resolve()),'-vf',vf,'-c:v','libx264','-crf','20','-c:a','copy',str(target.resolve())]
+    result=subprocess.run(cmd,cwd=str(srt.parent),capture_output=True,text=True)
+    if result.returncode!=0:
+        details=(result.stderr or result.stdout or f'FFmpeg exited with code {result.returncode}').strip()
+        raise RuntimeError(f'Subtitle burn-in failed: {details[-3000:]}')
+    return target
 
 def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,progress:Callable|None=None)->Path:
     scene.blocks=scene.blocks_by_language.get(language,scene.blocks); sig=_sig(project,scene,language,preview); paths=scene.preview_paths if preview else scene.render_paths; sigs=scene.preview_signatures if preview else scene.render_signatures
