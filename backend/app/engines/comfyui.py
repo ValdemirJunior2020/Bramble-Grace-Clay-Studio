@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable, Any
 
@@ -116,13 +119,39 @@ class ComfyUIAdapter:
                             files.extend(node.get("gifs") or node.get("videos") or node.get("images") or [])
                     if not files:
                         raise RuntimeError("ComfyUI completed but the configured output node returned no file.")
-                    item = files[0]
-                    params = {"filename": item["filename"], "subfolder": item.get("subfolder", ""), "type": item.get("type", "output")}
-                    data = client.get(f"{self.base_url}/view", params=params).content
                     target = Path(values["output_path"])
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(data)
-                    if progress_cb: progress_cb(1.0, "Complete")
+
+                    # Wan workflows may return a batch of saved PNG frames rather than
+                    # a single video file. This is more reliable across ComfyUI builds.
+                    if len(files) > 1 or all(str(x.get("filename","")).lower().endswith((".png",".jpg",".jpeg",".webp")) for x in files):
+                        ffmpeg = shutil.which("ffmpeg")
+                        if not ffmpeg:
+                            raise RuntimeError("FFmpeg is required to assemble ComfyUI frames into a video.")
+                        with tempfile.TemporaryDirectory(prefix="claystudio-wan-") as td:
+                            folder = Path(td)
+                            for i,item in enumerate(files):
+                                params = {"filename": item["filename"], "subfolder": item.get("subfolder", ""), "type": item.get("type", "output")}
+                                data = client.get(f"{self.base_url}/view", params=params).content
+                                (folder / f"frame-{i:06}.png").write_bytes(data)
+                            fps = float(values.get("fps") or 24)
+                            cmd=[
+                                ffmpeg,"-y","-hide_banner","-loglevel","error",
+                                "-framerate",str(fps),"-i",str(folder / "frame-%06d.png"),
+                                "-c:v","libx264","-pix_fmt","yuv420p","-crf","21",
+                                str(target)
+                            ]
+                            result=subprocess.run(cmd,capture_output=True,text=True)
+                            if result.returncode!=0:
+                                details=(result.stderr or result.stdout or "FFmpeg frame assembly failed").strip()
+                                raise RuntimeError(f"Could not assemble Wan frames into MP4: {details[-3000:]}")
+                    else:
+                        item = files[0]
+                        params = {"filename": item["filename"], "subfolder": item.get("subfolder", ""), "type": item.get("type", "output")}
+                        data = client.get(f"{self.base_url}/view", params=params).content
+                        target.write_bytes(data)
+
+                    if progress_cb: progress_cb(1.0, "Assembling Video")
                     return target
                 time.sleep(1.0)
         raise TimeoutError("ComfyUI generation timed out")
