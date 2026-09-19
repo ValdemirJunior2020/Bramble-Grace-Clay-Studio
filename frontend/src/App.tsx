@@ -143,7 +143,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
   {(p.settings.video_mode||'clay-ai')==='clay-ai'&&<>
     <div className="field"><label>Clay performance workflow</label><select value={p.settings.clay_performance_workflow||''} onChange={e=>setP({...p,settings:{...p.settings,clay_performance_workflow:e.target.value||null}})}>
       <option value="">Select installed image-to-video workflow</option>
-      {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.name||w.id}>{w.label||w.name||w.id}</option>)}
+      {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.id||w.name}>{w.label||w.name||w.id}</option>)}
     </select></div>
     <div className="field"><label>Performance strength</label><input type="range" min={0} max={1} step={.05} value={p.settings.clay_performance_strength??.75} onChange={e=>setP({...p,settings:{...p.settings,clay_performance_strength:+e.target.value}})}/><b>{Math.round((p.settings.clay_performance_strength??.75)*100)}%</b></div>
     <div className="pill warn">{workflows.length?'This mode uses your clay scene image plus the story acting plan for real model-generated character motion.':'No AI video workflow is installed yet. This mode will stop rather than pretending a still-image pan is full-body animation.'}</div>
@@ -151,7 +151,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
   {(p.settings.video_mode||'clay-ai')==='cinematic'&&<>
     <div className="field"><label>Cinematic workflow</label><select value={p.settings.cinematic_workflow||''} onChange={e=>setP({...p,settings:{...p.settings,cinematic_workflow:e.target.value||null}})}>
       <option value="">Select installed ComfyUI video workflow</option>
-      {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.name||w.id}>{w.label||w.name||w.id}</option>)}
+      {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.id||w.name}>{w.label||w.name||w.id}</option>)}
     </select></div>
     <div className="field"><label>Motion strength</label><input type="range" min={0} max={1} step={.05} value={p.settings.cinematic_motion_strength??.65} onChange={e=>setP({...p,settings:{...p.settings,cinematic_motion_strength:+e.target.value}})}/><b>{Math.round((p.settings.cinematic_motion_strength??.65)*100)}%</b></div>
     <div className="pill warn">{workflows.length? 'Cinematic will use the selected real ComfyUI workflow and your uploaded scene image as the source.' : 'No compatible ComfyUI video workflow is configured yet. Cinematic mode will not fake motion; install/select a real workflow first.'}</div>
