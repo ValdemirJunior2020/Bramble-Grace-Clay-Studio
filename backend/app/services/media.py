@@ -135,6 +135,49 @@ def _burn(video:Path,srt:Path,target:Path,style)->Path:
         raise RuntimeError(f'Subtitle burn-in failed: {details[-3000:]}')
     return target
 
+def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,target:Path,preview:bool=False,progress:Callable|None=None)->Path:
+    workflow=project.settings.clay_performance_workflow
+    if not workflow:
+        raise RuntimeError('AI Clay Performance is selected, but no clay performance workflow is installed/configured yet.')
+    adapter=ComfyUIAdapter()
+    if not adapter.availability().get('available'):
+        raise RuntimeError('AI Clay Performance requires ComfyUI to be running.')
+    w=project.settings.preview_width if preview else project.settings.width
+    h=project.settings.preview_height if preview else project.settings.height
+    fps=project.settings.preview_fps if preview else project.settings.fps
+    performance=acting_prompt(scene.acting_plan)
+    story_text=' '.join(b.text.strip() for b in scene.blocks if b.text.strip())
+    prompt=(
+        project.settings.clay_style_prompt+' '
+        'Animate the characters as physical handcrafted clay puppets performing the story. '
+        'Use full-body acting, articulated arms and legs, walking or running when requested, '
+        'clear head turns, readable facial expressions, eye-line changes, and believable reactions between characters. '
+        'Keep non-speaking characters alive with subtle reactions; only the active speaker should lip-sync. '
+        +performance+' Story context: '+story_text
+    ).strip()
+    raw=target.with_name(target.stem+'-clay-ai-raw.mp4')
+    values={
+        'input_image':scene.source_image,
+        'audio':str(audio),
+        'prompt':prompt,
+        'negative_prompt':'frozen pose, slideshow, still frame, camera-only movement, deformed limbs, extra limbs, identity change, warped face, duplicate character, melted clay, random mouth movement',
+        'width':w,'height':h,'fps':fps,'duration':_duration(audio),
+        'motion_strength':project.settings.clay_performance_strength,
+        'output_path':str(raw),
+    }
+    if progress: progress(.05,'Directing Clay Performance')
+    adapter.generate(workflow,values,progress_cb=progress)
+    if not raw.exists():
+        raise RuntimeError('The AI clay performance workflow completed without producing a video file.')
+    ff=require_ffmpeg()
+    target.parent.mkdir(parents=True,exist_ok=True)
+    result=subprocess.run([ff,'-y','-hide_banner','-loglevel','error','-i',str(raw),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','veryfast','-crf','21','-c:a','aac','-b:a','192k','-shortest',str(target)],capture_output=True,text=True)
+    raw.unlink(missing_ok=True)
+    if result.returncode!=0:
+        details=(result.stderr or result.stdout or f'FFmpeg exited with code {result.returncode}').strip()
+        raise RuntimeError(f'AI clay performance audio mux failed: {details[-3000:]}')
+    return target
+
 def render_cinematic_motion(project:Project,scene:Scene,audio:Path,cues:list,target:Path,preview:bool=False,progress:Callable|None=None)->Path:
     workflow=project.settings.cinematic_workflow
     if not workflow:
@@ -188,7 +231,9 @@ def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,pro
     outdir=Path(project.folder)/('cache/previews' if preview else f'scenes/{language}');outdir.mkdir(parents=True,exist_ok=True);base=outdir/f'{scene.number:03}-{scene.id}-base.mp4'
     style=scene.subtitle_override or project.settings.subtitle
     final=outdir/f'{scene.number:03}-{scene.id}.mp4'
-    if project.settings.video_mode=='cinematic':
+    if project.settings.video_mode=='clay-ai':
+        render_ai_clay_performance(project,scene,audio,cues,final,preview,progress)
+    elif project.settings.video_mode=='cinematic':
         render_cinematic_motion(project,scene,audio,cues,final,preview,progress)
     else:
         render_clay_motion(project,scene,audio,[],base,preview,progress,subtitle_cues=cues,subtitle_style=style)
