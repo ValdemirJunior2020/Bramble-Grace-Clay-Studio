@@ -12,13 +12,16 @@ from .storage import init_db,create_project,save_project,load_project,list_proje
 from .services.story_parser import read_story_file,split_bilingual,parse_script_blocks,assign_blocks_to_scenes
 from .services.acting import build_acting_plan
 from .services.hardware import system_status,mode_recommendations
-from .services.media import render_scene,render_story
+from .services.media import render_scene,render_story,build_scene_audio
 from .services.queue import render_queue
 from .engines.tts import generate_voice,chatterbox_available
 from .engines.comfyui import ComfyUIAdapter
 
 app=FastAPI(title=APP_NAME,version='0.1.0');app.add_middleware(CORSMiddleware,allow_origins=['*'],allow_methods=['*'],allow_headers=['*'])
 init_db();ensure_default_characters();app.mount('/media',StaticFiles(directory=str(DATA_DIR)),name='media')
+MOTIONITY_DIR=DATA_DIR/'tools'/'motionity'/'src'
+if MOTIONITY_DIR.exists():
+    app.mount('/motionity',StaticFiles(directory=str(MOTIONITY_DIR),html=True),name='motionity')
 
 def _url(path):
     if not path:return None
@@ -36,6 +39,33 @@ def health():return {'ok':True,'app':APP_NAME}
 @app.get('/api/system')
 def system():
     s=system_status();s.update({'backend':'Ready','comfyui':'Ready' if ComfyUIAdapter().availability().get('available') else 'Not Installed / Not Running','chatterbox':'Ready' if chatterbox_available() else 'Not Installed','models_folder':str(MODELS_DIR),'modes':mode_recommendations(s)});return s
+@app.get('/api/tools/motionity')
+def motionity_status():
+    return {'installed':MOTIONITY_DIR.exists(),'path':str(MOTIONITY_DIR)}
+
+@app.post('/api/projects/{pid}/scenes/{sid}/motionity-context')
+def motionity_context(pid:str,sid:str,language:str='en'):
+    if not MOTIONITY_DIR.exists():
+        raise HTTPException(409,'Motionity is not installed. Run INSTALL-MOTIONITY.bat, then restart Clay Studio.')
+    p=load_project(pid)
+    s=next((x for x in p.scenes if x.id==sid),None)
+    if not s: raise HTTPException(404,'Scene not found')
+    if language not in {'en','pt-br'}: language='en'
+    s.blocks=s.blocks_by_language.get(language,s.blocks)
+    audio,cues,duration=build_scene_audio(p,s,language)
+    return {
+        'motionity_url':'/motionity/index.html',
+        'image_url':_url(s.source_image),
+        'audio_url':_url(str(audio)),
+        'width':p.settings.width,
+        'height':p.settings.height,
+        'fps':p.settings.fps,
+        'duration':duration,
+        'scene_number':s.number,
+        'scene_name':s.name,
+        'acting_plan':[b.model_dump() for b in s.acting_plan],
+    }
+
 @app.get('/api/projects')
 def projects():return [public(p) for p in list_projects()]
 @app.post('/api/projects')
