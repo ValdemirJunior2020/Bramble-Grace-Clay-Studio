@@ -25,16 +25,35 @@ if(Test-Path (Join-Path $comfy 'main.py')){
 $env:COMFYUI_URL="http://127.0.0.1:$comfyPort"
 $backendPy=Join-Path $Root '.venv\Scripts\python.exe';if(-not(Test-Path $backendPy)){throw 'Run INSTALL.bat first.'}
 $backendPort=8765
-if(IsHealthy "http://127.0.0.1:$backendPort/api/health"){$url="http://127.0.0.1:$backendPort"}
-else{
- if(-not(IsPortFree $backendPort)){$backendPort=FreePort 8767}
- $env:BRAMBLE_BACKEND_PORT="$backendPort"
- $proc=Start-Process $backendPy -ArgumentList @('backend\run.py') -WorkingDirectory $Root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Logs 'backend.log') -RedirectStandardError (Join-Path $Logs 'backend-error.log') -PassThru
- Record-Owned $proc 'backend'
- $url="http://127.0.0.1:$backendPort"
- for($i=0;$i -lt 80;$i++){if(IsHealthy "$url/api/health"){break};Start-Sleep -Milliseconds 250}
- if(-not(IsHealthy "$url/api/health")){throw 'Backend did not start. Check logs\backend-error.log'}
+
+# Always refresh this project's backend so code updates are actually loaded.
+# Only stop processes whose command line clearly belongs to this Clay Studio root.
+$rootNeedle=$Root.ToLowerInvariant()
+$stale=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $_.CommandLine -and
+  $_.CommandLine.ToLowerInvariant().Contains($rootNeedle) -and
+  ($_.CommandLine -match 'backend[\\/]run\.py' -or $_.CommandLine -match 'uvicorn.+backend')
 }
+foreach($p in $stale){
+  try{
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
+    Write-Host "Stopped previous Clay Studio backend (PID $($p.ProcessId))"
+    Start-Sleep -Milliseconds 400
+  }catch{}
+}
+
+if(-not(IsPortFree $backendPort)){
+  if(IsHealthy "http://127.0.0.1:$backendPort/api/health"){
+    throw 'Port 8765 is occupied by another backend process. Close the older Clay Studio process and run START.bat again.'
+  }
+  $backendPort=FreePort 8767
+}
+$env:BRAMBLE_BACKEND_PORT="$backendPort"
+$proc=Start-Process $backendPy -ArgumentList @('backend\run.py') -WorkingDirectory $Root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Logs 'backend.log') -RedirectStandardError (Join-Path $Logs 'backend-error.log') -PassThru
+Record-Owned $proc 'backend'
+$url="http://127.0.0.1:$backendPort"
+for($i=0;$i -lt 80;$i++){if(IsHealthy "$url/api/health"){break};Start-Sleep -Milliseconds 250}
+if(-not(IsHealthy "$url/api/health")){throw 'Backend did not start. Check logs\backend-error.log'}
 Set-Content -Encoding UTF8 (Join-Path $Runtime 'last-url.txt') $url
 Start-Process $url
 Write-Host "Bramble & Grace Clay Studio is running at $url"
