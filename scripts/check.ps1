@@ -14,5 +14,10 @@ foreach($g in $gpus){Write-Host ('GPU: '+$g.Name)}
 $mem=$null
 Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Video' -ErrorAction SilentlyContinue|ForEach-Object{Get-ChildItem $_.PSPath -ErrorAction SilentlyContinue|ForEach-Object{try{$v=(Get-ItemProperty $_.PSPath -Name 'HardwareInformation.qwMemorySize' -ErrorAction Stop).'HardwareInformation.qwMemorySize';if($v -and [uint64]$v -gt [uint64]$mem){$mem=[uint64]$v}}catch{}}}
 if($mem){Write-Host ('GPU VRAM: '+[math]::Round($mem/1GB,1)+' GB')}
-$drive=Get-PSDrive -Name ([IO.Path]::GetPathRoot($Root).TrimEnd(':','\\'));Write-Host ('Disk: '+[math]::Round($drive.Free/1GB,1)+' GB free')
+$rootPath=[IO.Path]::GetPathRoot($Root)
+if($rootPath){
+  $driveName=$rootPath.Substring(0,1)
+  $drive=Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue
+  if($drive){Write-Host ('Disk: '+[math]::Round($drive.Free/1GB,1)+' GB free')}
+}
 if(Test-Path (Join-Path $Root 'frontend\dist\index.html')){Mark 'Frontend build' $true}else{Mark 'Frontend build' $false}
