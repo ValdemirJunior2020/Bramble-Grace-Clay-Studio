@@ -34,6 +34,27 @@ def public(p:Project):
         s['source_image_url']=_url(s['source_image']);s['preview_url']=_url((s.get('preview_paths')or{}).get(lang)or s.get('preview_path'));s['render_url']=_url((s.get('render_paths')or{}).get(lang)or s.get('render_path'))
     return d
 
+def _ensure_bramble_ai_defaults(p:Project)->Project:
+    changed=False
+    if p.settings.mode=='bramble' and p.settings.video_mode=='clay':
+        p.settings.video_mode='clay-ai'
+        changed=True
+    if p.settings.mode=='bramble' and p.settings.video_mode=='clay-ai' and not p.settings.clay_performance_workflow:
+        try:
+            workflows=ComfyUIAdapter().list_workflows()
+            preferred=next((w for w in workflows if w.get('id')=='wan22-ti2v-5b-clay'),None)
+            if not preferred:
+                preferred=next((w for w in workflows if 'Wan 2.2' in str(w.get('label','')) and '5B' in str(w.get('label',''))),None)
+            if preferred:
+                p.settings.clay_performance_workflow=preferred.get('id') or preferred.get('name')
+                changed=True
+        except Exception:
+            pass
+    if changed:
+        save_project(p)
+    return p
+
+
 @app.get('/api/health')
 def health():return {'ok':True,'app':APP_NAME}
 @app.get('/api/system')
@@ -71,10 +92,11 @@ def projects():return [public(p) for p in list_projects()]
 @app.post('/api/projects')
 def new_project(data:ProjectCreate):return public(create_project(data))
 @app.get('/api/projects/{pid}')
-def get_project(pid:str):return public(load_project(pid))
+def get_project(pid:str):
+    return public(_ensure_bramble_ai_defaults(load_project(pid)))
 @app.put('/api/projects/{pid}')
 def put_project(pid:str,payload:dict=Body(...)):
-    old=load_project(pid);payload['id']=old.id;payload['folder']=old.folder;payload['created_at']=old.created_at;p=Project.model_validate(payload);save_project(p);return public(p)
+    old=load_project(pid);payload['id']=old.id;payload['folder']=old.folder;payload['created_at']=old.created_at;p=Project.model_validate(payload);p=_ensure_bramble_ai_defaults(p);save_project(p);return public(p)
 
 @app.post('/api/projects/{pid}/import-story')
 async def import_story(pid:str,file:UploadFile|None=File(None),text:str|None=Form(None)):
@@ -250,25 +272,25 @@ def _review(blocks):return [b for b in blocks if b.type=='dialogue' and (b.needs
 @app.post('/api/projects/{pid}/scenes/{sid}/preview')
 def preview(pid:str,sid:str,language:str='en'):
     def run(progress):
-        p=load_project(pid);s=next(x for x in p.scenes if x.id==sid);path=render_scene(p,s,language,True,progress);save_project(p);return path
+        p=_ensure_bramble_ai_defaults(load_project(pid));s=next(x for x in p.scenes if x.id==sid);path=render_scene(p,s,language,True,progress);save_project(p);return path
     return render_queue.add(pid,'preview_scene',run,sid,metadata={'language':language}).model_dump()
 @app.post('/api/projects/{pid}/scenes/{sid}/render')
 def render_one(pid:str,sid:str,language:str='en'):
-    p=load_project(pid);s=next(x for x in p.scenes if x.id==sid)
+    p=_ensure_bramble_ai_defaults(load_project(pid));s=next(x for x in p.scenes if x.id==sid)
     if _review(s.blocks_by_language.get(language,s.blocks)):raise HTTPException(409,'This scene has speakers that still need review.')
     def run(progress):
         p=load_project(pid);s=next(x for x in p.scenes if x.id==sid);path=render_scene(p,s,language,False,progress);save_project(p);return path
     return render_queue.add(pid,'render_scene',run,sid,metadata={'language':language}).model_dump()
 @app.post('/api/projects/{pid}/render-story')
 def render_full(pid:str,language:str='en'):
-    p=load_project(pid)
+    p=_ensure_bramble_ai_defaults(load_project(pid))
     blocks=[b for s in p.scenes for b in s.blocks_by_language.get(language,s.blocks)]
     spoken=[b for b in blocks if b.type in {'dialogue','narrator'} and b.text.strip()]
     if not spoken:
         raise HTTPException(409,'No narration/dialogue is assigned to the scenes. Import the story text first so audio can be generated.')
     if any(_review(s.blocks_by_language.get(language,s.blocks)) for s in p.scenes):raise HTTPException(409,'Speaker review is required before final rendering.')
     def run(progress):
-        p=load_project(pid);path=render_story(p,language,progress);save_project(p);return path
+        p=_ensure_bramble_ai_defaults(load_project(pid));path=render_story(p,language,progress);save_project(p);return path
     return render_queue.add(pid,'render_story',run,metadata={'language':language}).model_dump()
 @app.get('/api/workflows')
 def workflows():return ComfyUIAdapter().list_workflows()
