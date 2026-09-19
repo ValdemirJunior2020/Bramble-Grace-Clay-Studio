@@ -156,12 +156,16 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
         +performance+' Story context: '+story_text
     ).strip()
     raw=target.with_name(target.stem+'-clay-ai-raw.mp4')
+    duration=_duration(audio)
+    # Wan video lengths work best on 4n+1 frame counts.
+    length=max(17,int(round(duration*fps/4))*4+1)
     values={
         'input_image':scene.source_image,
         'audio':str(audio),
         'prompt':prompt,
         'negative_prompt':'frozen pose, slideshow, still frame, camera-only movement, deformed limbs, extra limbs, identity change, warped face, duplicate character, melted clay, random mouth movement',
-        'width':w,'height':h,'fps':fps,'duration':_duration(audio),
+        'width':w,'height':h,'fps':fps,'duration':duration,'length':length,
+        'seed':abs(hash((project.id,scene.id)))%(2**63-1),
         'motion_strength':project.settings.clay_performance_strength,
         'output_path':str(raw),
     }
