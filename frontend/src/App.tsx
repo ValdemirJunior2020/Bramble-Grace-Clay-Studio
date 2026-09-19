@@ -32,7 +32,8 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
  useEffect(()=>{api('/api/workflows').then(setWorkflows).catch(()=>setWorkflows([]))},[]);
  const noScript=p.scenes.length>0&&p.scenes.every((s:Scene)=>s.blocks.length===0);
  const unresolved=p.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker)).map((b:any)=>({scene:s,block:b})));
- const missingSpeakerCount=unresolved.filter(({block}:any)=>!block.speaker).length;
+ const reviewRows=unresolved;
+ const missingSpeakerCount=reviewRows.filter(({block}:any)=>!String(block.speaker||'').trim()).length;
  const confirmSelectedSpeakers=async()=>{
    const scenes=new Map<string,Scene>();
    unresolved.forEach(({scene}:any)=>scenes.set(scene.id,scene));
@@ -98,7 +99,7 @@ function Editor({p,chars,setP,save,importStory,addImages,patchScene,move,switchL
    </div>)}
    <div className="toolbar" style={{marginTop:16}}>
      <button className="btn" onClick={()=>setShowSpeakerReview(false)}>Close</button>
-     <button className="btn primary" disabled={missingSpeakerCount>0} onClick={async()=>{await confirmSelectedSpeakers();setShowSpeakerReview(false);await renderFull()}}>Generate Full Movie</button>
+     <button className="btn primary" disabled={reviewRows.some(({block}:any)=>!String(block.speaker||'').trim())} onClick={async()=>{await confirmSelectedSpeakers();setShowSpeakerReview(false);await renderFull()}}>Generate Full Movie</button>
    </div>
  </div></div>}<div className="toolbar"><button className="btn" onClick={()=>switchLang('en')}>English</button><button className="btn" onClick={()=>switchLang('pt-br')}>Português Brasileiro</button><button className="btn primary" disabled={busy} onClick={renderFull}>{busy?'Working...':'Generate Full Movie'}</button><button className="btn" onClick={()=>api(`/api/projects/${p.id}/open-folder`,{method:'POST'})}>Open Project Folder</button></div><h1>{p.title}</h1><div className="two"><div className="card"><h3>Story text</h3><textarea style={{width:'100%',minHeight:160}} value={text} onChange={e=>setText(e.target.value)} placeholder="Paste one story here..."/><div className="toolbar"><button className="btn primary" onClick={()=>importStory(undefined,text)}>Import pasted text</button><label className="btn">Import DOCX/TXT/MD<input hidden type="file" accept=".docx,.txt,.md" onChange={e=>e.target.files&&importStory(e.target.files[0])}/></label></div></div><div className="card"><h3>Output</h3>
 <div className="card" style={{marginBottom:14,background:'#f7f8f5'}}>
