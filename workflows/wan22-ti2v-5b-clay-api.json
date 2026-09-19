@@ -113,26 +113,14 @@
       "image": "example.png"
     }
   },
-  "57": {
-    "class_type": "CreateVideo",
+  "58": {
+    "class_type": "SaveImage",
     "inputs": {
       "images": [
         "8",
         0
       ],
-      "fps": 24
-    }
-  },
-  "58": {
-    "class_type": "SaveVideo",
-    "inputs": {
-      "video": [
-        "57",
-        0
-      ],
-      "filename_prefix": "video/ClayStudio-Wan22",
-      "format": "auto",
-      "codec": "auto"
+      "filename_prefix": "ClayStudio-Wan22"
     }
   }
 }
