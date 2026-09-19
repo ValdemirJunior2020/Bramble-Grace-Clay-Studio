@@ -10,6 +10,7 @@ from .config import APP_NAME, ROOT_DIR, DATA_DIR, CHARACTERS_DIR, MODELS_DIR
 from .models import ProjectCreate, Project, Character, Scene, ScenePatch, ReorderRequest, VoiceSettings
 from .storage import init_db,create_project,save_project,load_project,list_projects,save_character,list_characters,load_character,ensure_default_characters
 from .services.story_parser import read_story_file,split_bilingual,parse_script_blocks,assign_blocks_to_scenes
+from .services.acting import build_acting_plan
 from .services.hardware import system_status,mode_recommendations
 from .services.media import render_scene,render_story
 from .services.queue import render_queue
@@ -56,8 +57,14 @@ async def import_story(pid:str,file:UploadFile|None=File(None),text:str|None=For
 def _assign(p:Project):
     if not p.scenes:return
     en=assign_blocks_to_scenes(p.script_blocks_en,len(p.scenes));pt=assign_blocks_to_scenes(p.script_blocks_pt,len(p.scenes));lang=p.settings.language if p.settings.language in {'en','pt-br'} else 'en'
+    names=[c.name for c in list_characters() if c.id!='narrator']
     for i,s in enumerate(sorted(p.scenes,key=lambda x:x.number)):
-        s.blocks_by_language['en']=en[i] if i<len(en) else [];s.blocks_by_language['pt-br']=pt[i] if i<len(pt) else [];s.blocks=s.blocks_by_language.get(lang,[])
+        s.blocks_by_language['en']=en[i] if i<len(en) else []
+        s.blocks_by_language['pt-br']=pt[i] if i<len(pt) else []
+        s.blocks=s.blocks_by_language.get(lang,[])
+        s.acting_plan=build_acting_plan(s.blocks,names)
+        if s.acting_plan:
+            s.characters_visible=sorted({b.character for b in s.acting_plan if b.character})
 
 @app.post('/api/projects/{pid}/scenes')
 async def add_scenes(pid:str,files:list[UploadFile]=File(...)):
@@ -115,7 +122,11 @@ def reorder(pid:str,data:ReorderRequest):
 def language(pid:str,lang:str):
     if lang not in {'en','pt-br'}:raise HTTPException(400,'Language must be en or pt-br')
     p=load_project(pid);old=p.settings.language if p.settings.language in {'en','pt-br'} else 'en'
-    for s in p.scenes:s.blocks_by_language[old]=s.blocks;s.blocks=s.blocks_by_language.get(lang,[])
+    names=[c.name for c in list_characters() if c.id!='narrator']
+    for s in p.scenes:
+        s.blocks_by_language[old]=s.blocks
+        s.blocks=s.blocks_by_language.get(lang,[])
+        s.acting_plan=build_acting_plan(s.blocks,names)
     p.settings.language=lang;save_project(p);return public(p)
 
 @app.get('/api/characters')
