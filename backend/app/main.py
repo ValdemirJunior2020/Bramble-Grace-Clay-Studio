@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, shutil, subprocess, uuid, zipfile
 from pathlib import Path
+from PIL import Image
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -73,6 +74,36 @@ def patch_scene(pid:str,sid:str,patch:ScenePatch):
     if not s:raise HTTPException(404,'Scene not found')
     for k,v in patch.model_dump(exclude_none=True).items():setattr(s,k,v)
     lang=p.settings.language if p.settings.language in {'en','pt-br'} else 'en';s.blocks_by_language[lang]=s.blocks;save_project(p);return public(p)
+@app.post('/api/projects/{pid}/scenes/{sid}/character-reference')
+def scene_character_reference(pid:str,sid:str,payload:dict=Body(...)):
+    p=load_project(pid)
+    s=next((x for x in p.scenes if x.id==sid),None)
+    if not s: raise HTTPException(404,'Scene not found')
+    cid=str(payload.get('character_id') or '').strip()
+    if not cid: raise HTTPException(400,'character_id is required')
+    try: character=load_character(cid)
+    except Exception: raise HTTPException(404,'Character not found')
+    try:
+        x=float(payload.get('x')); y=float(payload.get('y')); size=float(payload.get('size',0.22))
+    except Exception:
+        raise HTTPException(400,'x, y and size must be numbers')
+    x=max(0.0,min(1.0,x)); y=max(0.0,min(1.0,y)); size=max(0.08,min(0.65,size))
+    source=Path(s.source_image)
+    if not source.exists(): raise HTTPException(404,'Scene image file is missing')
+    with Image.open(source) as im:
+        im=im.convert('RGB'); w,h=im.size
+        side=max(64,int(min(w,h)*size))
+        cx=int(x*w); cy=int(y*h)
+        left=max(0,min(w-side,cx-side//2)); top=max(0,min(h-side,cy-side//2))
+        crop=im.crop((left,top,min(w,left+side),min(h,top+side)))
+        folder=CHARACTERS_DIR/cid/'references'; folder.mkdir(parents=True,exist_ok=True)
+        target=folder/f'scene-{sid}-{uuid.uuid4().hex[:6]}.png'
+        crop.save(target,'PNG')
+    character.reference_images.append(str(target))
+    character.main_portrait=character.main_portrait or str(target)
+    save_character(character)
+    return {'ok':True,'character':character.model_dump(),'reference_url':_url(str(target))}
+
 @app.post('/api/projects/{pid}/scenes/reorder')
 def reorder(pid:str,data:ReorderRequest):
     p=load_project(pid);m={s.id:s for s in p.scenes}
