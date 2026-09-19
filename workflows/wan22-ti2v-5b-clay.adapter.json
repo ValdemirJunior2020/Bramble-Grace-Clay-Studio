@@ -38,10 +38,6 @@
     "length": {
       "node": "55",
       "field": "length"
-    },
-    "fps": {
-      "node": "57",
-      "field": "fps"
     }
   }
 }
