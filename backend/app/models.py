@@ -81,6 +81,16 @@ class ScriptBlock(BaseModel):
     pause_after: float = 0.25
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+class ActingBeat(BaseModel):
+    character: str
+    action: str
+    emotion: str = "engaged"
+    target: str | None = None
+    intensity: float = Field(0.6, ge=0.0, le=1.0)
+    start: float = Field(0.0, ge=0.0, le=1.0)
+    end: float = Field(1.0, ge=0.0, le=1.0)
+    source_text: str = ""
+
 class CharacterPlacement(BaseModel):
     character_id: str
     visible: bool = True
@@ -100,6 +110,8 @@ class Scene(BaseModel):
     blocks_by_language: dict[str, list[ScriptBlock]] = Field(default_factory=dict)
     characters_visible: list[str] = Field(default_factory=list)
     character_placements: list[CharacterPlacement] = Field(default_factory=list)
+    acting_plan: list[ActingBeat] = Field(default_factory=list)
+    performance_enabled: bool = True
     animation_mode: AnimationMode = "clay-motion"
     workflow_name: str | None = None
     lip_sync_mode: LipSyncMode = "auto"
@@ -189,6 +201,8 @@ class ScenePatch(BaseModel):
     blocks: list[ScriptBlock] | None = None
     characters_visible: list[str] | None = None
     character_placements: list[CharacterPlacement] | None = None
+    acting_plan: list[ActingBeat] | None = None
+    performance_enabled: bool | None = None
     animation_mode: AnimationMode | None = None
     workflow_name: str | None = None
     lip_sync_mode: LipSyncMode | None = None
