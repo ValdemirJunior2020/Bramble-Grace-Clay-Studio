@@ -159,8 +159,10 @@ class ProjectSettings(BaseModel):
     music_fade_in: float = 1.0
     music_fade_out: float = 2.0
     clay_style_prompt: str = "Handcrafted modeling-clay children's animation, visible handmade clay texture, subtle fingerprints and sculpted details, miniature practical set, soft warm lighting, expressive stop-motion character acting, child-friendly, cinematic composition."
-    video_mode: Literal["clay", "cinematic"] = "clay"
+    video_mode: Literal["clay", "clay-ai", "cinematic"] = "clay"
     render_profile: Literal["balanced", "high"] = "balanced"
+    clay_performance_workflow: str | None = None
+    clay_performance_strength: float = Field(0.75, ge=0.0, le=1.0)
     cinematic_workflow: str | None = None
     cinematic_motion_strength: float = Field(0.65, ge=0.0, le=1.0)
 
