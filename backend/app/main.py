@@ -38,7 +38,7 @@ def public(p:Project):
 def health():return {'ok':True,'app':APP_NAME}
 @app.get('/api/system')
 def system():
-    s=system_status();s.update({'backend':'Ready','comfyui':'Ready' if ComfyUIAdapter().availability().get('available') else 'Not Installed / Not Running','chatterbox':'Ready' if chatterbox_available() else 'Not Installed','models_folder':str(MODELS_DIR),'modes':mode_recommendations(s)});return s
+    s=system_status();s.update({'backend':'Ready','comfyui':'Ready' if ComfyUIAdapter().availability().get('available') else 'Not Installed / Not Running','chatterbox':'Ready' if chatterbox_available() else 'Not Installed','motionity':'Ready' if MOTIONITY_DIR.exists() else 'Not Installed','models_folder':str(MODELS_DIR),'modes':mode_recommendations(s)});return s
 @app.get('/api/tools/motionity')
 def motionity_status():
     return {'installed':MOTIONITY_DIR.exists(),'path':str(MOTIONITY_DIR)}
