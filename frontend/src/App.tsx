@@ -130,7 +130,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,patchScene
  </div></div>}<div className="toolbar"><button className="btn" onClick={()=>switchLang('en')}>English</button><button className="btn" onClick={()=>switchLang('pt-br')}>Português Brasileiro</button><button className="btn primary" disabled={busy} onClick={renderFull}>{busy?'Working...':'Generate Full Movie'}</button><button className="btn" onClick={()=>api(`/api/projects/${p.id}/open-folder`,{method:'POST'})}>Open Project Folder</button></div><h1>{p.title}</h1><div className="two"><div className="card"><h3>Story text</h3><textarea style={{width:'100%',minHeight:160}} value={text} onChange={e=>setText(e.target.value)} placeholder="Paste one story here..."/><div className="toolbar"><button className="btn primary" onClick={()=>importStory(undefined,text)}>Import pasted text</button><label className="btn">Import DOCX/TXT/MD<input hidden type="file" accept=".docx,.txt,.md" onChange={e=>e.target.files&&importStory(e.target.files[0])}/></label></div></div><div className="card"><h3>Output</h3>
 <div className="card" style={{marginBottom:14,background:'#f7f8f5'}}>
   <h3 style={{marginTop:0}}>Video Settings</h3>
-  <div className="field"><label>Video mode</label><select value={p.settings.video_mode||'clay'} onChange={e=>setP({...p,settings:{...p.settings,video_mode:e.target.value}})}>
+  <div className="field"><label>Video mode</label><select value={p.settings.video_mode||'clay-ai'} onChange={e=>setP({...p,settings:{...p.settings,video_mode:e.target.value}})}>
     <option value="clay">Legacy Clay Motion — simple fallback</option>
     <option value="clay-ai">AI Clay Performance — full-body acting</option>
     <option value="cinematic">Cinematic — ComfyUI Image-to-Video</option>
@@ -139,7 +139,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,patchScene
     <option value="balanced">Balanced — current AMD GPU</option>
     <option value="high">High Quality — future 5090 / stronger GPU</option>
   </select></div>
-  {(p.settings.video_mode||'clay')==='clay-ai'&&<>
+  {(p.settings.video_mode||'clay-ai')==='clay-ai'&&<>
     <div className="field"><label>Clay performance workflow</label><select value={p.settings.clay_performance_workflow||''} onChange={e=>setP({...p,settings:{...p.settings,clay_performance_workflow:e.target.value||null}})}>
       <option value="">Select installed image-to-video workflow</option>
       {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.name||w.id}>{w.label||w.name||w.id}</option>)}
@@ -147,7 +147,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,patchScene
     <div className="field"><label>Performance strength</label><input type="range" min={0} max={1} step={.05} value={p.settings.clay_performance_strength??.75} onChange={e=>setP({...p,settings:{...p.settings,clay_performance_strength:+e.target.value}})}/><b>{Math.round((p.settings.clay_performance_strength??.75)*100)}%</b></div>
     <div className="pill warn">{workflows.length?'This mode uses your clay scene image plus the story acting plan for real model-generated character motion.':'No AI video workflow is installed yet. This mode will stop rather than pretending a still-image pan is full-body animation.'}</div>
   </>}
-  {(p.settings.video_mode||'clay')==='cinematic'&&<>
+  {(p.settings.video_mode||'clay-ai')==='cinematic'&&<>
     <div className="field"><label>Cinematic workflow</label><select value={p.settings.cinematic_workflow||''} onChange={e=>setP({...p,settings:{...p.settings,cinematic_workflow:e.target.value||null}})}>
       <option value="">Select installed ComfyUI video workflow</option>
       {workflows.map((w:any)=><option key={w.name||w.id||w.config_file} value={w.name||w.id}>{w.label||w.name||w.id}</option>)}
