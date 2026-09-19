@@ -43,10 +43,37 @@ foreach($p in $stale){
 }
 
 if(-not(IsPortFree $backendPort)){
-  if(IsHealthy "http://127.0.0.1:$backendPort/api/health"){
-    throw 'Port 8765 is occupied by another backend process. Close the older Clay Studio process and run START.bat again.'
+  $ownerPid=$null
+  try{
+    $conn=Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if(-not $conn){
+      $conn=Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if($conn){$ownerPid=$conn.OwningProcess}
+  }catch{}
+
+  $stoppedOldClay=$false
+  if($ownerPid){
+    try{
+      $owner=Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+      $cmd=("$($owner.CommandLine)").ToLowerInvariant()
+      if($cmd -and ($cmd.Contains('bramble-grace-clay-studio') -or $cmd -match 'backend[\\/]run\.py') -and ($cmd -match 'python|uvicorn')){
+        Stop-Process -Id $ownerPid -Force -ErrorAction Stop
+        Write-Host "Stopped older Clay Studio backend on port 8765 (PID $ownerPid)" -ForegroundColor Yellow
+        Start-Sleep -Milliseconds 700
+        $stoppedOldClay=$true
+      }
+    }catch{}
   }
-  $backendPort=FreePort 8767
+
+  if(-not(IsPortFree $backendPort)){
+    $backendPort=FreePort 8767
+    if($stoppedOldClay){
+      Write-Host "Port 8765 did not free in time. Using port $backendPort instead." -ForegroundColor Yellow
+    } else {
+      Write-Host "Port 8765 is in use by another process. Using port $backendPort instead." -ForegroundColor Yellow
+    }
+  }
 }
 $env:BRAMBLE_BACKEND_PORT="$backendPort"
 $proc=Start-Process $backendPy -ArgumentList @('backend\run.py') -WorkingDirectory $Root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Logs 'backend.log') -RedirectStandardError (Join-Path $Logs 'backend-error.log') -PassThru
