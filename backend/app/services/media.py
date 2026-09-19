@@ -11,7 +11,7 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v7"
+RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v8"
 TTS_CACHE_VERSION = "2026-09-19-voice-v3"
 
 def require_ffmpeg()->str:
@@ -165,9 +165,10 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
     adapter=ComfyUIAdapter()
     if not adapter.availability().get('available'):
         raise RuntimeError('AI Clay Performance requires ComfyUI to be running.')
-    w=project.settings.preview_width if preview else project.settings.width
-    h=project.settings.preview_height if preview else project.settings.height
-    fps=project.settings.preview_fps if preview else project.settings.fps
+
+    out_w=project.settings.preview_width if preview else project.settings.width
+    out_h=project.settings.preview_height if preview else project.settings.height
+    out_fps=project.settings.preview_fps if preview else project.settings.fps
     performance=acting_prompt(scene.acting_plan)
     story_text=' '.join(b.text.strip() for b in scene.blocks if b.text.strip())
     prompt=(
@@ -178,31 +179,112 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
         'Keep non-speaking characters alive with subtle reactions; only the active speaker should lip-sync. '
         +performance+' Story context: '+story_text
     ).strip()
-    raw=target.with_name(target.stem+'-clay-ai-raw.mp4')
+
     duration=_duration(audio)
-    # Wan video lengths work best on 4n+1 frame counts.
-    length=max(17,int(round(duration*fps/4))*4+1)
-    values={
-        'input_image':scene.source_image,
-        'audio':str(audio),
-        'prompt':prompt,
-        'negative_prompt':'frozen pose, slideshow, still frame, camera-only movement, deformed limbs, extra limbs, identity change, warped face, duplicate character, melted clay, random mouth movement',
-        'width':w,'height':h,'fps':fps,'duration':duration,'length':length,
-        'seed':abs(hash((project.id,scene.id)))%(2**63-1),
-        'motion_strength':project.settings.clay_performance_strength,
-        'output_path':str(raw),
-    }
-    if progress: progress(.05,'Directing Clay Performance')
-    adapter.generate(workflow,values,progress_cb=progress)
-    if not raw.exists():
-        raise RuntimeError('The AI clay performance workflow completed without producing a video file.')
     ff=require_ffmpeg()
+
+    # Wan TI2V can exceed 16 GB VRAM very quickly at 1280x704 and long frame counts.
+    # Balanced mode therefore renders short low-resolution chunks and stitches them.
+    # High mode keeps the larger settings for future higher-VRAM GPUs.
+    balanced = project.settings.render_profile == 'balanced'
+    gen_w = min(out_w, 640) if balanced else out_w
+    gen_h = min(out_h, 352) if balanced else out_h
+    gen_w = max(256, (gen_w // 32) * 32)
+    gen_h = max(256, (gen_h // 32) * 32)
+    gen_fps = min(out_fps, 8) if balanced else out_fps
+    max_chunk_frames = 33 if balanced else 81  # 4n+1 frame counts
+    max_chunk_seconds = (max_chunk_frames - 1) / max(1, gen_fps)
+
     target.parent.mkdir(parents=True,exist_ok=True)
-    result=subprocess.run([ff,'-y','-hide_banner','-loglevel','error','-i',str(raw),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','veryfast','-crf','21','-c:a','aac','-b:a','192k','-shortest',str(target)],capture_output=True,text=True)
-    raw.unlink(missing_ok=True)
-    if result.returncode!=0:
-        details=(result.stderr or result.stdout or f'FFmpeg exited with code {result.returncode}').strip()
-        raise RuntimeError(f'AI clay performance audio mux failed: {details[-3000:]}')
+    chunk_dir=target.parent/f'{target.stem}-wan-chunks'
+    if chunk_dir.exists():
+        shutil.rmtree(chunk_dir,ignore_errors=True)
+    chunk_dir.mkdir(parents=True,exist_ok=True)
+
+    chunk_paths=[]
+    remaining=duration
+    chunk_index=0
+    source_image=Path(scene.source_image)
+    try:
+        while remaining > 0.05:
+            chunk_index += 1
+            chunk_seconds=min(remaining,max_chunk_seconds)
+            requested_frames=max(17,int(round(chunk_seconds*gen_fps/4))*4+1)
+            length=min(max_chunk_frames,requested_frames)
+            raw=chunk_dir/f'chunk-{chunk_index:03}.mp4'
+            values={
+                'input_image':str(source_image),
+                'audio':str(audio),
+                'prompt':prompt,
+                'negative_prompt':'frozen pose, slideshow, still frame, camera-only movement, deformed limbs, extra limbs, identity change, warped face, duplicate character, melted clay, random mouth movement',
+                'width':gen_w,'height':gen_h,'fps':gen_fps,'duration':chunk_seconds,'length':length,
+                'seed':(abs(hash((project.id,scene.id)))+chunk_index)%(2**63-1),
+                'motion_strength':project.settings.clay_performance_strength,
+                'output_path':str(raw),
+            }
+            if progress:
+                base=.05 + .72*((duration-remaining)/max(duration,.01))
+                progress(base,f'Generating Motion Chunk {chunk_index}')
+
+            adapter.generate(workflow,values,progress_cb=(
+                (lambda v,st,base=base: progress(min(.82,base+v*.18),f'Chunk {chunk_index}: {st}'))
+                if progress else None
+            ))
+            if not raw.exists():
+                raise RuntimeError(f'Wan chunk {chunk_index} completed without producing a video file.')
+            chunk_paths.append(raw)
+
+            # Continue the next chunk from the last generated frame for smoother motion continuity.
+            last_frame=chunk_dir/f'chunk-{chunk_index:03}-last.png'
+            grab=subprocess.run([
+                ff,'-y','-hide_banner','-loglevel','error',
+                '-sseof','-0.05','-i',str(raw),'-frames:v','1',str(last_frame)
+            ],capture_output=True,text=True)
+            if grab.returncode==0 and last_frame.exists():
+                source_image=last_frame
+
+            actual_chunk=(length-1)/max(1,gen_fps)
+            remaining-=max(.1,actual_chunk)
+
+        if progress: progress(.84,'Joining Motion Chunks')
+
+        concat_file=chunk_dir/'concat.txt'
+        concat_file.write_text(''.join(
+            "file '"+str(p.resolve()).replace("'","'\\''")+"'"+"\n" for p in chunk_paths
+        ),encoding='utf-8')
+        joined=chunk_dir/'joined.mp4'
+        join=subprocess.run([
+            ff,'-y','-hide_banner','-loglevel','error',
+            '-f','concat','-safe','0','-i',str(concat_file),
+            '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+            str(joined)
+        ],capture_output=True,text=True)
+        if join.returncode!=0:
+            details=(join.stderr or join.stdout or 'FFmpeg concat failed').strip()
+            raise RuntimeError(f'Could not join Wan motion chunks: {details[-3000:]}')
+
+        if progress: progress(.92,'Adding Audio and Finalizing')
+        vf=[]
+        if gen_w!=out_w or gen_h!=out_h:
+            vf=['-vf',f'scale={out_w}:{out_h}:flags=lanczos']
+        result=subprocess.run([
+            ff,'-y','-hide_banner','-loglevel','error',
+            '-i',str(joined),'-i',str(audio),
+            '-map','0:v:0','-map','1:a:0',
+            *vf,
+            '-r',str(out_fps),
+            '-c:v','libx264','-preset','veryfast','-crf','21',
+            '-c:a','aac','-b:a','192k',
+            '-t',f'{duration:.3f}',
+            str(target)
+        ],capture_output=True,text=True)
+        if result.returncode!=0:
+            details=(result.stderr or result.stdout or f'FFmpeg exited with code {result.returncode}').strip()
+            raise RuntimeError(f'AI clay performance finalization failed: {details[-3000:]}')
+    finally:
+        shutil.rmtree(chunk_dir,ignore_errors=True)
+
+    if progress: progress(1.0,'Complete')
     return target
 
 def render_cinematic_motion(project:Project,scene:Scene,audio:Path,cues:list,target:Path,preview:bool=False,progress:Callable|None=None)->Path:
