@@ -147,8 +147,8 @@ class ProjectSettings(BaseModel):
     height: int = 1080
     preview_width: int = 640
     preview_height: int = 360
-    fps: int = 24
-    preview_fps: int = 15
+    fps: int = Field(24, ge=1, le=30)
+    preview_fps: int = Field(15, ge=1, le=30)
     subtitle: SubtitleStyle = Field(default_factory=SubtitleStyle)
     voice_speed_global: float = Field(1.0, ge=0.5, le=2.0)
     background_fill: Literal["crop", "fit", "blur", "solid"] = "crop"
