@@ -262,11 +262,13 @@ def confirm_speakers(pid:str, language:str='en'):
         for b in blocks:
             if b.type!='dialogue':
                 continue
-            if b.speaker and str(b.speaker).strip():
+            speaker=str(b.speaker or '').strip()
+            if speaker and speaker.lower()!='narrator':
                 b.needs_review=False
                 b.speaker_confidence=1.0
                 changed=True
             else:
+                b.needs_review=True
                 missing.append({'scene':s.number,'block_id':b.id,'text':b.text})
         if changed:
             s.blocks_by_language[language]=blocks
