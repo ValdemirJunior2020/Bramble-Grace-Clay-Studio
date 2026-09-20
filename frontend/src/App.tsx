@@ -163,6 +163,31 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
   {s.acting_plan.length>5?' • …':''}
 </div>}{s.blocks.map((b:any)=><div className="speaker" key={b.id}><select value={b.speaker||''} onChange={e=>{const blocks=s.blocks.map((x:any)=>x.id===b.id?{...x,speaker:e.target.value,needs_review:false}:x);patchScene(s,{blocks})}}><option value="">Speaker needs review</option><option value="Narrator">Narrator</option>{chars.filter((c:Character)=>c.id!=='narrator').map((c:Character)=><option key={c.id} value={c.name}>{c.name}</option>)}</select><textarea value={b.text} readOnly/></div>)}</div><div><button className="btn" onClick={()=>move(s,-1)}>↑</button><button className="btn" onClick={()=>move(s,1)}>↓</button><label className="btn">Replace Image<input hidden type="file" accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(f)replaceImage(s,f);e.currentTarget.value=''}}/></label><button className="btn" onClick={()=>animateScene(s)}>Animate Scene</button><button className="btn primary" onClick={()=>render('preview',s)}>Preview</button>{s.preview_url&&<video controls width="210" src={media(s.preview_url)}/>}</div></div>)}</>}
 function Characters({chars,refresh}:any){
+ const uploadVoice=async(c:Character,language:'en'|'pt-br',file:File|null|undefined)=>{
+   if(!file)return;
+   const fd=new FormData();
+   fd.append('language',language);
+   fd.append('file',file);
+   await api(`/api/characters/${c.id}/voice-reference`,{method:'POST',body:fd});
+   await refresh();
+ };
+ const bulkVoiceUpload=async(files:FileList|null)=>{
+   if(!files)return;
+   const unmatched:string[]=[];
+   for(const file of Array.from(files)){
+     const base=file.name.toLowerCase().replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ');
+     const match=chars.find((c:Character)=>{
+       const name=c.name.toLowerCase();
+       const id=c.id.toLowerCase().replace(/[_-]+/g,' ');
+       return base.includes(name)||base.includes(id);
+     });
+     if(!match){unmatched.push(file.name);continue}
+     const language:'en'|'pt-br' = /(pt|br|portugu|brazil)/i.test(base)?'pt-br':'en';
+     await uploadVoice(match,language,file);
+   }
+   await refresh();
+   if(unmatched.length)alert('Could not match voice file(s): '+unmatched.join(', ')+'\nUse names like Grace-voice.mp3, Pip-voice.mp3, Bramble-voice-pt-br.mp3.');
+ };
  const uploadFor=async(c:Character,files:FileList|null)=>{
    if(!files||files.length===0)return;
    const fd=new FormData();Array.from(files).forEach(f=>fd.append('files',f));
@@ -194,12 +219,33 @@ function Characters({chars,refresh}:any){
        <input hidden multiple type="file" accept="image/*" onChange={e=>bulkUpload(e.target.files)}/>
      </label>
    </div>
+   <div className="card" style={{marginBottom:16}}>
+     <h3>Character Voices</h3>
+     <p className="muted">Upload MP3 or WAV voice samples. Files like Grace-voice.mp3 and Pip-voice.mp3 are matched automatically. Add pt-br, portuguese, or br to the filename for Portuguese.</p>
+     <label className="btn primary">Upload Character Voices
+       <input hidden multiple type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" onChange={e=>bulkVoiceUpload(e.target.files)}/>
+     </label>
+   </div>
    <div className="grid">{chars.map((c:Character)=><div className="card" key={c.id}>
      <h3>{c.name}</h3><div className="muted">{c.species}</div>
      <div className="muted" style={{margin:'8px 0'}}>{c.reference_images?.length||0} face/reference image(s) saved</div>
      <label className="btn">Add {c.name} Face
        <input hidden multiple type="file" accept="image/*" onChange={e=>uploadFor(c,e.target.files)}/>
      </label>
+     <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #e3e7df'}}>
+       <b>Voice samples</b>
+       <div className="muted" style={{margin:'5px 0 9px'}}>
+         EN: {c.voice_en.reference_audio?'Voice saved':'No voice uploaded'} • PT-BR: {c.voice_pt_br.reference_audio?'Voice saved':'No voice uploaded'}
+       </div>
+       <div className="toolbar" style={{gap:6,flexWrap:'wrap'}}>
+         <label className="btn">{c.voice_en.reference_audio?'Replace English Voice':'Upload English Voice'}
+           <input hidden type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" onChange={e=>{uploadVoice(c,'en',e.target.files?.[0]);e.currentTarget.value=''}}/>
+         </label>
+         <label className="btn">{c.voice_pt_br.reference_audio?'Replace PT-BR Voice':'Upload PT-BR Voice'}
+           <input hidden type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac" onChange={e=>{uploadVoice(c,'pt-br',e.target.files?.[0]);e.currentTarget.value=''}}/>
+         </label>
+       </div>
+     </div>
      <div className="field" style={{marginTop:12}}><label>English speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_en.speed} onChange={async e=>{c.voice_en.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div>
      <div className="field"><label>PT-BR speed</label><input type="number" step={.05} min={.5} max={2} value={c.voice_pt_br.speed} onChange={async e=>{c.voice_pt_br.speed=+e.target.value;await api(`/api/characters/${c.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});refresh()}}/></div>
    </div>)}</div></>
