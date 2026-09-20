@@ -284,9 +284,34 @@ def resume():render_queue.resume();return {'ok':True}
 @app.post('/api/queue/{jid}/cancel')
 def cancel(jid:str):render_queue.cancel(jid);return {'ok':True}
 
-def _review(blocks):return [b for b in blocks if b.type=='dialogue' and (b.needs_review or not b.speaker)]
+def _review(blocks):
+    return [
+        b for b in blocks
+        if b.type=='dialogue' and (
+            b.needs_review or not b.speaker or str(b.speaker).strip().lower()=='narrator'
+        )
+    ]
+
+def _normalize_block_speakers(blocks):
+    changed=False
+    for b in blocks:
+        if b.type=='narrator' and b.speaker!='Narrator':
+            b.speaker='Narrator'
+            b.speaker_confidence=1.0
+            b.needs_review=False
+            changed=True
+    return changed
+
 @app.post('/api/projects/{pid}/scenes/{sid}/preview')
 def preview(pid:str,sid:str,language:str='en'):
+    p=_ensure_bramble_ai_defaults(load_project(pid));s=next(x for x in p.scenes if x.id==sid)
+    blocks=s.blocks_by_language.get(language,s.blocks)
+    if _normalize_block_speakers(blocks):
+        s.blocks_by_language[language]=blocks
+        if p.settings.language==language:s.blocks=blocks
+        save_project(p)
+    if _review(blocks):
+        raise HTTPException(409,'Speaker review is required before preview. Character dialogue will no longer fall back to the Narrator voice.')
     def run(progress):
         p=_ensure_bramble_ai_defaults(load_project(pid));s=next(x for x in p.scenes if x.id==sid);path=render_scene(p,s,language,True,progress);save_project(p);return path
     return render_queue.add(pid,'preview_scene',run,sid,metadata={'language':language}).model_dump()
