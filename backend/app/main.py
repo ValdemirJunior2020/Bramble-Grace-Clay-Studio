@@ -6,6 +6,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from .config import APP_NAME, ROOT_DIR, DATA_DIR, CHARACTERS_DIR, MODELS_DIR
 from .models import ProjectCreate, Project, Character, Scene, ScenePatch, ReorderRequest, VoiceSettings
 from .storage import init_db,create_project,save_project,load_project,list_projects,save_character,list_characters,load_character,ensure_default_characters
@@ -18,6 +19,21 @@ from .engines.tts import generate_voice,chatterbox_available
 from .engines.comfyui import ComfyUIAdapter
 
 app=FastAPI(title=APP_NAME,version='0.1.0');app.add_middleware(CORSMiddleware,allow_origins=['*'],allow_methods=['*'],allow_headers=['*'])
+
+class FrontendCacheControlMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response=await call_next(request)
+        path=request.url.path
+        if not path.startswith('/api/') and not path.startswith('/media/'):
+            # The frontend uses hashed assets. Never cache HTML that may point
+            # at hashes removed by a newer local Vite build.
+            if path=='/' or path.endswith('.html') or path.startswith('/assets/'):
+                response.headers['Cache-Control']='no-store, no-cache, must-revalidate, max-age=0'
+                response.headers['Pragma']='no-cache'
+                response.headers['Expires']='0'
+        return response
+
+app.add_middleware(FrontendCacheControlMiddleware)
 init_db();ensure_default_characters();app.mount('/media',StaticFiles(directory=str(DATA_DIR)),name='media')
 MOTIONITY_DIR=DATA_DIR/'tools'/'motionity'/'src'
 if MOTIONITY_DIR.exists():
