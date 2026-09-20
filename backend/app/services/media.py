@@ -11,7 +11,7 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v9"
+RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v10"
 TTS_CACHE_VERSION = "2026-09-19-voice-v3"
 
 def require_ffmpeg()->str:
@@ -351,8 +351,18 @@ def render_scene(project:Project,scene:Scene,language:str,preview:bool=False,pro
     final=outdir/f'{scene.number:03}-{scene.id}.mp4'
     if project.settings.video_mode=='clay-ai':
         render_ai_clay_performance(project,scene,audio,cues,final,preview,progress)
+        if style.enabled and style.burn_in and cues:
+            if progress: progress(.98,'Burning Subtitles')
+            subtitled=outdir/f'{scene.number:03}-{scene.id}-subtitled.mp4'
+            _burn(final,srt,subtitled,style)
+            subtitled.replace(final)
     elif project.settings.video_mode=='cinematic':
         render_cinematic_motion(project,scene,audio,cues,final,preview,progress)
+        if style.enabled and style.burn_in and cues:
+            if progress: progress(.98,'Burning Subtitles')
+            subtitled=outdir/f'{scene.number:03}-{scene.id}-subtitled.mp4'
+            _burn(final,srt,subtitled,style)
+            subtitled.replace(final)
     else:
         if project.settings.mode=='bramble':
             raise RuntimeError('Legacy Clay Motion is disabled for Bramble & Grace because it does not provide real character acting. Select AI Clay Performance in Video Settings.')
