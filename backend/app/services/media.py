@@ -11,7 +11,7 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v8"
+RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v9"
 TTS_CACHE_VERSION = "2026-09-19-voice-v3"
 
 def require_ffmpeg()->str:
@@ -191,7 +191,7 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
     gen_h = min(out_h, 352) if balanced else out_h
     gen_w = max(256, (gen_w // 32) * 32)
     gen_h = max(256, (gen_h // 32) * 32)
-    gen_fps = min(out_fps, 8) if balanced else out_fps
+    gen_fps = min(out_fps, 12) if balanced else out_fps
     max_chunk_frames = 33 if balanced else 81  # 4n+1 frame counts
     max_chunk_seconds = (max_chunk_frames - 1) / max(1, gen_fps)
 
@@ -264,15 +264,22 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
             raise RuntimeError(f'Could not join Wan motion chunks: {details[-3000:]}')
 
         if progress: progress(.92,'Adding Audio and Finalizing')
-        vf=[]
+        filters=[]
         if gen_w!=out_w or gen_h!=out_h:
-            vf=['-vf',f'scale={out_w}:{out_h}:flags=lanczos']
+            filters.append(f'scale={out_w}:{out_h}:flags=lanczos')
+        # Never create the final FPS by simply duplicating low-FPS Wan frames.
+        # Motion interpolation generates intermediate frames and removes the
+        # frame-by-frame judder that looks like a tiny pause on every image.
+        if gen_fps < out_fps:
+            filters.append(
+                f'minterpolate=fps={out_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1'
+            )
+        vf=['-vf',','.join(filters)] if filters else []
         result=subprocess.run([
             ff,'-y','-hide_banner','-loglevel','error',
             '-i',str(joined),'-i',str(audio),
             '-map','0:v:0','-map','1:a:0',
             *vf,
-            '-r',str(out_fps),
             '-c:v','libx264','-preset','veryfast','-crf','21',
             '-c:a','aac','-b:a','192k',
             '-t',f'{duration:.3f}',
