@@ -3,6 +3,25 @@ $Root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Logs=Join-Path $Root 'logs';New-Item -ItemType Directory -Force $Logs|Out-Null
 $Runtime=Join-Path $Root 'runtime';New-Item -ItemType Directory -Force $Runtime|Out-Null
 $PidFile=Join-Path $Runtime 'owned-pids.txt'
+
+# Keep the served Vite bundle synchronized with frontend/src.
+# This prevents index.html from referencing stale hashed JS/CSS files after git pull.
+$Frontend=Join-Path $Root 'frontend'
+$FrontendPackage=Join-Path $Frontend 'package.json'
+if(Test-Path $FrontendPackage){
+  $npm=(Get-Command npm.cmd -ErrorAction SilentlyContinue)
+  if(-not $npm){$npm=(Get-Command npm -ErrorAction SilentlyContinue)}
+  if($npm){
+    Write-Host 'Building current frontend...' -ForegroundColor Cyan
+    Push-Location $Frontend
+    try{
+      & $npm.Source run build
+      if($LASTEXITCODE -ne 0){throw 'Frontend build failed. Fix the build error before starting Clay Studio.'}
+    }finally{Pop-Location}
+  }else{
+    throw 'npm was not found. Node.js/npm is required to build the Clay Studio frontend.'
+  }
+}
 function Record-Owned($proc,[string]$label){try{$ticks=$proc.StartTime.ToFileTimeUtc();Add-Content -Encoding UTF8 $PidFile "$($proc.Id)|$ticks|$label"}catch{}}
 $env:HF_HOME=Join-Path $Root 'data\models\huggingface'
 $env:PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True'
