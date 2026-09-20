@@ -11,8 +11,8 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-19-ai-clay-v10"
-TTS_CACHE_VERSION = "2026-09-19-voice-v3"
+RENDER_ENGINE_VERSION = "2026-09-20-ai-clay-v11"
+TTS_CACHE_VERSION = "2026-09-20-voice-v4"
 
 def require_ffmpeg()->str:
     exe=shutil.which('ffmpeg')
@@ -39,7 +39,10 @@ def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|Non
         if progress: progress(i/max(1,len(blocks)),'Generating Voice')
         out=folder/'audio'/lang/f'{scene.id}-{i:03}.wav'
         if b.type in {'dialogue','narrator'} and b.text.strip():
-            speaker=b.speaker or 'Narrator'; cid=speaker.lower().replace(' ','-')
+            # Narration must never inherit the previous character voice.
+            # Only dialogue blocks are allowed to use a character speaker.
+            speaker='Narrator' if b.type=='narrator' else (b.speaker or 'Narrator')
+            cid=speaker.lower().replace(' ','-')
             try:c=load_character(cid)
             except Exception:c=load_character('narrator')
             settings=c.voice_pt_br if lang=='pt-br' else c.voice_en
@@ -191,7 +194,7 @@ def render_ai_clay_performance(project:Project,scene:Scene,audio:Path,cues:list,
     gen_h = min(out_h, 352) if balanced else out_h
     gen_w = max(256, (gen_w // 32) * 32)
     gen_h = max(256, (gen_h // 32) * 32)
-    gen_fps = min(out_fps, 12) if balanced else out_fps
+    gen_fps = min(out_fps, 15) if balanced else out_fps
     max_chunk_frames = 33 if balanced else 81  # 4n+1 frame counts
     max_chunk_seconds = (max_chunk_frames - 1) / max(1, gen_fps)
 
