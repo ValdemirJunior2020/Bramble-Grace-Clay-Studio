@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from docx import Document
 
@@ -37,16 +35,15 @@ def _slice_between(text: str, starts: list[str], ends: list[str]) -> str:
 
 
 def split_bilingual(text: str) -> StoryVersions:
-    # Keeps source wording untouched; only sections are separated.
     english = _slice_between(
         text,
         ["\nEnglish\n", "\r\nEnglish\r\n", "English\n"],
-        ["\nHeart Lesson", "\nFor Parents", "\nHistória ", "\nPortuguês Brasileiro"]
+        ["\nHeart Lesson", "\nFor Parents", "\nHistória ", "\nPortuguês Brasileiro"],
     )
     pt = _slice_between(
         text,
         ["\nPortuguês Brasileiro\n", "Português Brasileiro\n"],
-        ["\nLição para o Coração", "\nPara os Pais", "\nStory "]
+        ["\nLição para o Coração", "\nPara os Pais", "\nStory "],
     )
     heart_en = _slice_between(text, ["\nHeart Lesson\n", "Heart Lesson\n"], ["\nFor Parents", "\nHistória ", "\nPortuguês Brasileiro"])
     parents_en = _slice_between(text, ["\nFor Parents: Why This Story Matters\n", "\nFor Parents\n"], ["\nHistória ", "\nPortuguês Brasileiro"])
@@ -54,7 +51,6 @@ def split_bilingual(text: str) -> StoryVersions:
     parents_pt = _slice_between(text, ["\nPara os Pais: Por Que Esta História é Importante\n", "\nPara os Pais\n"], ["\nStory "])
 
     if not english and not pt:
-        # Single-language source. Keep it in English slot by default; user can change it later.
         english = text.strip()
 
     return StoryVersions(
@@ -68,86 +64,20 @@ def split_bilingual(text: str) -> StoryVersions:
 
 
 def _speaker_from_context(before: str, after: str, character_names: list[str]) -> tuple[str | None, float]:
-    # Strong patterns on BOTH sides of the quote:
-    # Pip said, "..."   /   "...," Pip said.   /   "...," said Pip.
     for name in character_names:
         before_patterns = [
             rf'\b{re.escape(name)}\b[^.!?\n]{{0,70}}{SPEECH_VERBS}',
             rf'{SPEECH_VERBS}[^.!?\n]{{0,35}}\b{re.escape(name)}\b',
         ]
         after_patterns = [
-            rf'^\s*[,;:.!?-]*\s*\b{re.escape(name)}\b[^.!?\n]{{0,55}}{SPEECH_VERBS}',
-            rf'^\s*[,;:.!?-]*\s*{SPEECH_VERBS}[^.!?\n]{{0,35}}\b{re.escape(name)}\b',
+            rf'^\s*[,;:.!?—-]*\s*\b{re.escape(name)}\b[^.!?\n]{{0,55}}{SPEECH_VERBS}',
+            rf'^\s*[,;:.!?—-]*\s*{SPEECH_VERBS}[^.!?\n]{{0,35}}\b{re.escape(name)}\b',
         ]
         if any(re.search(p, before, flags=re.I) for p in before_patterns):
             return name, 0.98
         if any(re.search(p, after, flags=re.I) for p in after_patterns):
             return name, 0.98
 
-    # Explicit labels are also reliable: Pip: Hello! / Grace — Wait!
-    for name in character_names:
-        if re.search(rf'(?:^|\n)\s*{re.escape(name)}\s*[:—-]\s*
-
-def parse_script_blocks(text: str, character_names: list[str]) -> list[ScriptBlock]:
-    blocks: list[ScriptBlock] = []
-    if not text.strip():
-        return blocks
-
-    # Process paragraph-by-paragraph to preserve source order.
-    paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
-    last_speaker: str | None = None
-    for paragraph in paragraphs:
-        # Support screenplay-style lines such as "Pip: Look!" or "Grace — Wait."
-        labeled = None
-        for name in character_names:
-            m = re.match(rf'^\s*{re.escape(name)}\s*[:—-]\s*(.+)
-        cursor = 0
-        for match in matches:
-            before = paragraph[cursor:match.start()].strip()
-            if before:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=before, speaker="Narrator", speaker_confidence=1.0))
-            context_start = max(0, match.start() - 160)
-            before_context = paragraph[context_start:match.start()]
-            after_context = paragraph[match.end():min(len(paragraph),match.end()+120)]
-            speaker, confidence = _speaker_from_context(before_context, after_context, character_names)
-            # If a quote follows immediately after another quote and no clear cue is present, never blindly alternate.
-            needs_review = speaker is None or confidence < 0.75
-            if speaker:
-                last_speaker = speaker
-            blocks.append(ScriptBlock(
-                id=uuid.uuid4().hex[:12], type="dialogue", text=match.group(1).strip(),
-                speaker=speaker, speaker_confidence=confidence, needs_review=needs_review,
-            ))
-            cursor = match.end()
-        after = paragraph[cursor:].strip()
-        if after:
-            blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=after, speaker="Narrator", speaker_confidence=1.0))
-    return blocks
-
-
-def assign_blocks_to_scenes(blocks: list[ScriptBlock], scene_count: int) -> list[list[ScriptBlock]]:
-    if scene_count <= 0:
-        return []
-    result: list[list[ScriptBlock]] = [[] for _ in range(scene_count)]
-    if not blocks:
-        return result
-    # Evenly distribute by text weight. This is a suggestion only and is reviewed before rendering.
-    weights = [max(1, len(b.text)) for b in blocks]
-    total = sum(weights)
-    target = total / scene_count
-    scene_index = 0
-    acc = 0.0
-    for block, weight in zip(blocks, weights):
-        if scene_index < scene_count - 1 and acc >= target:
-            scene_index += 1
-            acc = 0.0
-        result[scene_index].append(block)
-        acc += weight
-    return result
-, before, flags=re.I):
-            return name, 0.99
-
-    # Weaker fallback: nearest named character immediately before the quote.
     found: list[tuple[int, str]] = []
     low = before.lower()
     for name in character_names:
@@ -167,70 +97,25 @@ def parse_script_blocks(text: str, character_names: list[str]) -> list[ScriptBlo
     if not text.strip():
         return blocks
 
-    # Process paragraph-by-paragraph to preserve source order.
     paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
-    last_speaker: str | None = None
     for paragraph in paragraphs:
-        matches = list(QUOTE_RE.finditer(paragraph))
-        if not matches:
-            if paragraph.isupper() and len(paragraph) < 60:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="sound_effect", text=paragraph))
-            else:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=paragraph, speaker="Narrator", speaker_confidence=1.0))
-            continue
-
-        cursor = 0
-        for match in matches:
-            before = paragraph[cursor:match.start()].strip()
-            if before:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=before, speaker="Narrator", speaker_confidence=1.0))
-            context_start = max(0, match.start() - 140)
-            context = paragraph[context_start:match.start()]
-            speaker, confidence = _speaker_from_context(context, character_names)
-            # If a quote follows immediately after another quote and no clear cue is present, never blindly alternate.
-            needs_review = speaker is None or confidence < 0.75
-            if speaker:
-                last_speaker = speaker
-            blocks.append(ScriptBlock(
-                id=uuid.uuid4().hex[:12], type="dialogue", text=match.group(1).strip(),
-                speaker=speaker, speaker_confidence=confidence, needs_review=needs_review,
-            ))
-            cursor = match.end()
-        after = paragraph[cursor:].strip()
-        if after:
-            blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=after, speaker="Narrator", speaker_confidence=1.0))
-    return blocks
-
-
-def assign_blocks_to_scenes(blocks: list[ScriptBlock], scene_count: int) -> list[list[ScriptBlock]]:
-    if scene_count <= 0:
-        return []
-    result: list[list[ScriptBlock]] = [[] for _ in range(scene_count)]
-    if not blocks:
-        return result
-    # Evenly distribute by text weight. This is a suggestion only and is reviewed before rendering.
-    weights = [max(1, len(b.text)) for b in blocks]
-    total = sum(weights)
-    target = total / scene_count
-    scene_index = 0
-    acc = 0.0
-    for block, weight in zip(blocks, weights):
-        if scene_index < scene_count - 1 and acc >= target:
-            scene_index += 1
-            acc = 0.0
-        result[scene_index].append(block)
-        acc += weight
-    return result
-, paragraph, flags=re.I)
+        labeled: tuple[str, str] | None = None
+        for name in character_names:
+            m = re.match(rf'^\s*{re.escape(name)}\s*[:—-]\s*(.+)$', paragraph, flags=re.I)
             if m and m.group(1).strip():
                 labeled = (name, m.group(1).strip())
                 break
         if labeled:
-            blocks.append(ScriptBlock(
-                id=uuid.uuid4().hex[:12], type="dialogue", text=labeled[1],
-                speaker=labeled[0], speaker_confidence=0.99, needs_review=False,
-            ))
-            last_speaker=labeled[0]
+            blocks.append(
+                ScriptBlock(
+                    id=uuid.uuid4().hex[:12],
+                    type="dialogue",
+                    text=labeled[1],
+                    speaker=labeled[0],
+                    speaker_confidence=0.99,
+                    needs_review=False,
+                )
+            )
             continue
 
         matches = list(QUOTE_RE.finditer(paragraph))
@@ -238,29 +123,57 @@ def assign_blocks_to_scenes(blocks: list[ScriptBlock], scene_count: int) -> list
             if paragraph.isupper() and len(paragraph) < 60:
                 blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="sound_effect", text=paragraph))
             else:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=paragraph, speaker="Narrator", speaker_confidence=1.0))
+                blocks.append(
+                    ScriptBlock(
+                        id=uuid.uuid4().hex[:12],
+                        type="narrator",
+                        text=paragraph,
+                        speaker="Narrator",
+                        speaker_confidence=1.0,
+                    )
+                )
             continue
 
         cursor = 0
         for match in matches:
-            before = paragraph[cursor:match.start()].strip()
-            if before:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=before, speaker="Narrator", speaker_confidence=1.0))
-            context_start = max(0, match.start() - 140)
-            context = paragraph[context_start:match.start()]
-            speaker, confidence = _speaker_from_context(context, character_names)
-            # If a quote follows immediately after another quote and no clear cue is present, never blindly alternate.
-            needs_review = speaker is None or confidence < 0.75
-            if speaker:
-                last_speaker = speaker
-            blocks.append(ScriptBlock(
-                id=uuid.uuid4().hex[:12], type="dialogue", text=match.group(1).strip(),
-                speaker=speaker, speaker_confidence=confidence, needs_review=needs_review,
-            ))
+            before_text = paragraph[cursor:match.start()].strip()
+            if before_text:
+                blocks.append(
+                    ScriptBlock(
+                        id=uuid.uuid4().hex[:12],
+                        type="narrator",
+                        text=before_text,
+                        speaker="Narrator",
+                        speaker_confidence=1.0,
+                    )
+                )
+
+            before_context = paragraph[max(0, match.start() - 160):match.start()]
+            after_context = paragraph[match.end():min(len(paragraph), match.end() + 120)]
+            speaker, confidence = _speaker_from_context(before_context, after_context, character_names)
+            blocks.append(
+                ScriptBlock(
+                    id=uuid.uuid4().hex[:12],
+                    type="dialogue",
+                    text=match.group(1).strip(),
+                    speaker=speaker,
+                    speaker_confidence=confidence,
+                    needs_review=speaker is None or confidence < 0.75,
+                )
+            )
             cursor = match.end()
-        after = paragraph[cursor:].strip()
-        if after:
-            blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=after, speaker="Narrator", speaker_confidence=1.0))
+
+        after_text = paragraph[cursor:].strip()
+        if after_text:
+            blocks.append(
+                ScriptBlock(
+                    id=uuid.uuid4().hex[:12],
+                    type="narrator",
+                    text=after_text,
+                    speaker="Narrator",
+                    speaker_confidence=1.0,
+                )
+            )
     return blocks
 
 
@@ -270,84 +183,7 @@ def assign_blocks_to_scenes(blocks: list[ScriptBlock], scene_count: int) -> list
     result: list[list[ScriptBlock]] = [[] for _ in range(scene_count)]
     if not blocks:
         return result
-    # Evenly distribute by text weight. This is a suggestion only and is reviewed before rendering.
-    weights = [max(1, len(b.text)) for b in blocks]
-    total = sum(weights)
-    target = total / scene_count
-    scene_index = 0
-    acc = 0.0
-    for block, weight in zip(blocks, weights):
-        if scene_index < scene_count - 1 and acc >= target:
-            scene_index += 1
-            acc = 0.0
-        result[scene_index].append(block)
-        acc += weight
-    return result
-, before, flags=re.I):
-            return name, 0.99
 
-    # Weaker fallback: nearest named character immediately before the quote.
-    found: list[tuple[int, str]] = []
-    low = before.lower()
-    for name in character_names:
-        idx = low.rfind(name.lower())
-        if idx >= 0:
-            found.append((idx, name))
-    if found:
-        found.sort(reverse=True)
-        idx, name = found[0]
-        if len(before) - idx < 75:
-            return name, 0.68
-    return None, 0.0
-
-
-def parse_script_blocks(text: str, character_names: list[str]) -> list[ScriptBlock]:
-    blocks: list[ScriptBlock] = []
-    if not text.strip():
-        return blocks
-
-    # Process paragraph-by-paragraph to preserve source order.
-    paragraphs = [p.strip() for p in re.split(r'\n+', text) if p.strip()]
-    last_speaker: str | None = None
-    for paragraph in paragraphs:
-        matches = list(QUOTE_RE.finditer(paragraph))
-        if not matches:
-            if paragraph.isupper() and len(paragraph) < 60:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="sound_effect", text=paragraph))
-            else:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=paragraph, speaker="Narrator", speaker_confidence=1.0))
-            continue
-
-        cursor = 0
-        for match in matches:
-            before = paragraph[cursor:match.start()].strip()
-            if before:
-                blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=before, speaker="Narrator", speaker_confidence=1.0))
-            context_start = max(0, match.start() - 140)
-            context = paragraph[context_start:match.start()]
-            speaker, confidence = _speaker_from_context(context, character_names)
-            # If a quote follows immediately after another quote and no clear cue is present, never blindly alternate.
-            needs_review = speaker is None or confidence < 0.75
-            if speaker:
-                last_speaker = speaker
-            blocks.append(ScriptBlock(
-                id=uuid.uuid4().hex[:12], type="dialogue", text=match.group(1).strip(),
-                speaker=speaker, speaker_confidence=confidence, needs_review=needs_review,
-            ))
-            cursor = match.end()
-        after = paragraph[cursor:].strip()
-        if after:
-            blocks.append(ScriptBlock(id=uuid.uuid4().hex[:12], type="narrator", text=after, speaker="Narrator", speaker_confidence=1.0))
-    return blocks
-
-
-def assign_blocks_to_scenes(blocks: list[ScriptBlock], scene_count: int) -> list[list[ScriptBlock]]:
-    if scene_count <= 0:
-        return []
-    result: list[list[ScriptBlock]] = [[] for _ in range(scene_count)]
-    if not blocks:
-        return result
-    # Evenly distribute by text weight. This is a suggestion only and is reviewed before rendering.
     weights = [max(1, len(b.text)) for b in blocks]
     total = sum(weights)
     target = total / scene_count
