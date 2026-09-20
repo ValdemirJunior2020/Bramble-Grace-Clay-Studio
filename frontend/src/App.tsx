@@ -33,7 +33,7 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
  const[workflows,setWorkflows]=useState<any[]>([]);
  useEffect(()=>{api('/api/workflows').then(setWorkflows).catch(()=>setWorkflows([]))},[]);
  const noScript=p.scenes.length>0&&p.scenes.every((s:Scene)=>s.blocks.length===0);
- const unresolved=p.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker)).map((b:any)=>({scene:s,block:b})));
+ const unresolved=p.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker||String(b.speaker).trim().toLowerCase()==='narrator')).map((b:any)=>({scene:s,block:b})));
  const reviewRows=unresolved;
  const missingSpeakerCount=reviewRows.filter(({block}:any)=>!String(block.speaker||'').trim()).length;
  const confirmSelectedSpeakers=async()=>{
@@ -65,11 +65,11 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
        setMsg('No narration/dialogue was assigned after import. Check the story text before generating.');
        return;
      }
-     const pending=active.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker)));
-     const missing=pending.filter((b:any)=>!b.speaker);
+     const pending=active.scenes.flatMap((s:Scene)=>s.blocks.filter((b:any)=>b.type==='dialogue'&&(b.needs_review||!b.speaker||String(b.speaker).trim().toLowerCase()==='narrator')));
+     const missing=pending.filter((b:any)=>!b.speaker||String(b.speaker).trim().toLowerCase()==='narrator');
      if(missing.length>0){
        setShowSpeakerReview(true);
-       setMsg(`${missing.length} dialogue line(s) still need a speaker before the full movie can be generated.`);
+       setMsg(`${missing.length} dialogue line(s) need the correct character selected before the full movie can be generated.`);
        return;
      }
      if(pending.length>0){
@@ -101,7 +101,6 @@ function Editor({p,chars,setP,save,importStory,addImages,replaceImage,animateSce
        await patchScene(scene,{blocks});
      }}>
        <option value="">Select speaker</option>
-       <option value="Narrator">Narrator</option>
        {chars.filter((c:Character)=>c.id!=='narrator').map((c:Character)=><option key={c.id} value={c.name}>{c.name}</option>)}
      </select></div>
    </div>)}
