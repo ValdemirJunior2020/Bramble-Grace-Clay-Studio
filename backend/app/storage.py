@@ -81,7 +81,52 @@ def load_project(project_id: str) -> Project:
     return Project.model_validate(payload)
 
 
+def _recover_projects_from_disk() -> None:
+    """Rebuild missing SQLite project rows from existing project folders.
+
+    The project.json files on disk are the durable source of truth. This makes
+    upgrades/recreated databases non-destructive: saved stories reappear
+    automatically instead of looking deleted.
+    """
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    with _lock:
+        with sqlite3.connect(DB_PATH) as db:
+            for project_file in PROJECTS_DIR.glob("*/project.json"):
+                try:
+                    payload = json.loads(project_file.read_text(encoding="utf-8"))
+                    project = Project.model_validate(payload)
+                    actual_folder = project_file.parent.resolve()
+
+                    # If the project folder was moved with the app, repair the
+                    # stored absolute folder path to its current on-disk home.
+                    if Path(project.folder).resolve() != actual_folder:
+                        project.folder = str(actual_folder)
+                        _write_json_atomic(project_file, project.model_dump())
+
+                    db.execute(
+                        "INSERT INTO projects(id,title,folder,updated_at,render_status) "
+                        "VALUES(?,?,?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET "
+                        "title=excluded.title,folder=excluded.folder,"
+                        "updated_at=excluded.updated_at,render_status=excluded.render_status",
+                        (
+                            project.id,
+                            project.title,
+                            project.folder,
+                            project.updated_at,
+                            project.render_status,
+                        ),
+                    )
+                except Exception:
+                    # One damaged project must never hide the rest.
+                    continue
+            db.commit()
+
+
 def list_projects() -> list[Project]:
+    # Always reconcile the lightweight SQLite index with project.json files.
+    # This recovers saved stories if studio.sqlite3 is missing/recreated.
+    _recover_projects_from_disk()
     with sqlite3.connect(DB_PATH) as db:
         rows = db.execute("SELECT id FROM projects ORDER BY updated_at DESC").fetchall()
     out: list[Project] = []
