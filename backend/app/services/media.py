@@ -11,8 +11,8 @@ from .subtitles import write_srt, write_vtt
 from .acting import acting_prompt
 
 # Bump whenever rendering behavior changes so old scene videos are not reused.
-RENDER_ENGINE_VERSION = "2026-09-20-ai-clay-v11"
-TTS_CACHE_VERSION = "2026-09-20-voice-v4"
+RENDER_ENGINE_VERSION = "2026-09-20-ai-clay-v12"
+TTS_CACHE_VERSION = "2026-09-20-voice-v5"
 
 def require_ffmpeg()->str:
     exe=shutil.which('ffmpeg')
@@ -41,10 +41,24 @@ def build_scene_audio(project:Project,scene:Scene,lang:str,progress:Callable|Non
         if b.type in {'dialogue','narrator'} and b.text.strip():
             # Narration must never inherit the previous character voice.
             # Only dialogue blocks are allowed to use a character speaker.
-            speaker='Narrator' if b.type=='narrator' else (b.speaker or 'Narrator')
-            cid=speaker.lower().replace(' ','-')
-            try:c=load_character(cid)
-            except Exception:c=load_character('narrator')
+            if b.type=='narrator':
+                speaker='Narrator'
+                c=load_character('narrator')
+            else:
+                speaker=(b.speaker or '').strip()
+                if not speaker or speaker.lower()=='narrator':
+                    raise RuntimeError(
+                        f'Dialogue speaker is unresolved for: "{b.text[:90]}". '
+                        'Choose Pip, Grace, Bramble, Oliver, Barnaby, or the correct character before rendering.'
+                    )
+                cid=speaker.lower().replace(' ','-')
+                try:
+                    c=load_character(cid)
+                except Exception:
+                    raise RuntimeError(
+                        f'Dialogue is assigned to "{speaker}", but that character voice does not exist. '
+                        'Choose a valid character before rendering.'
+                    )
             settings=c.voice_pt_br if lang=='pt-br' else c.voice_en
             voice_sig=hashlib.sha256(json.dumps({
                 'version':TTS_CACHE_VERSION,
